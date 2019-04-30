@@ -45,6 +45,7 @@ typedef enum
 
 #define TIMER_LOG_MS							(1000)
 #define ADC_SAMPLETIME_MS						(20)
+#define GPIO_TOGGLE_MS							(500)
 
 #define ADC_RESOLUTION							(uint16_t)(4096u)
 #define ADC_REF_VOLTAGE							(uint16_t)(3300u)	//(float)(3.3f)
@@ -79,6 +80,28 @@ uint32_t movingAverageSum_Target = 0;
 uint8_t ADCDataReady = 0;
 
 ADC_DataState_TypeDef ADCDataState = ADC_DataState_DEFAULT;
+
+
+void GPIO_Toggle(void)
+{
+    static uint8_t flag = 1;
+
+	if (flag)
+	{
+		P05 = 1;
+		flag = 0;
+	}
+	else
+	{
+		P05 = 0;
+		flag = 1;
+	}
+}
+
+void GPIO_Init(void)
+{
+    P05_PUSHPULL_MODE;
+}
 
 void ADC_ReadAVdd(void)
 {
@@ -273,6 +296,15 @@ void ADC_InitChannel(uint8_t CH)
 
 }
 
+void PWM0_CH1_SetDuty(uint16_t d)
+{
+    PWM1H = HIBYTE(d);
+    PWM1L = LOBYTE(d);
+
+    set_PWMCON0_LOAD;
+    set_PWMCON0_PWMRUN;	
+}
+
 void PWM0_CH0_SetDuty(uint16_t d)
 {
     PWM0H = HIBYTE(d);
@@ -283,8 +315,9 @@ void PWM0_CH0_SetDuty(uint16_t d)
 	
 }
 
-void PWM0_CH0_Init(uint16_t uFrequency)
+void PWM0_CHx_Init(uint16_t uFrequency)
 {
+    PWM1_P11_OUTPUT_ENABLE;	
     PWM0_P12_OUTPUT_ENABLE;
   
     PWM_IMDEPENDENT_MODE;
@@ -299,6 +332,8 @@ void PWM0_CH0_Init(uint16_t uFrequency)
 	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
 	
 	PWM0_CH0_SetDuty(LED_REVERSE(0));	
+
+	PWM0_CH1_SetDuty(50);
 }
 
 
@@ -307,7 +342,8 @@ void Timer0_IRQHandler(void)
 //	static uint16_t LOG_TIMER = 0;
 	static uint16_t CNT_TIMER = 0;
 	static uint16_t CNT_ADC = 0;
-
+	static uint16_t CNT_GPIO = 0;
+	
 	if (CNT_LED++ >= 18)
 	{		
 		CNT_LED = 0;
@@ -330,6 +366,12 @@ void Timer0_IRQHandler(void)
 			}			
 		}
 	}
+
+	if (CNT_GPIO++ >= GPIO_TOGGLE_MS)
+	{		
+		CNT_GPIO = 0;
+		GPIO_Toggle();
+	}	
 
 	if (CNT_ADC++ >= ADC_SAMPLETIME_MS)
 	{		
@@ -392,16 +434,19 @@ void main (void)
 
     UART0_Init();
 
-	PWM0_CH0_Init(PWM_FREQ);	//P1.2 , LED1
+	PWM0_CHx_Init(PWM_FREQ);	//P1.2 , PWM0_CH0  , LED1
+								//P1.1 , PWM0_CH1  , fix duty
 
 	ADC_InitChannel(ADC_CH5);	//P0.4 , ADC_CH5
+
+	GPIO_Init();					//P05 , GPIO
 			
 	BasicTimer_TIMER0_Init();
 	
 
     while(1)
     {
-
+		GPIO_Toggle(); 
     }
 
 
