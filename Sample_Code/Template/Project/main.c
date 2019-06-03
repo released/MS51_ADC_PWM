@@ -65,14 +65,14 @@ typedef enum
 #define ADC_DIGITAL_SCALE(void) 					(0xFFFU >> ((0) >> (3U - 1U)))		//0: 12 BIT 
 #define ADC_CALC_DATA_TO_VOLTAGE(DATA,VREF) 	((DATA) * (VREF) / ADC_DIGITAL_SCALE())
 
-#define CUSTOM_INPUT_VOLT_MAX					(3300ul)
-#define CUSTOM_INPUT_VOLT_MIN					(2300ul)
+#define CUSTOM_INPUT_VOLT_MAX(VREF)			(VREF)			//(3300ul)
+#define CUSTOM_INPUT_VOLT_MIN					(1300ul)
 
-#define GET_ADC_BY_INPUT_VOLT_MAX				((CUSTOM_INPUT_VOLT_MAX*ADC_MAX_TARGET)/ADC_REF_VOLTAGE)
-#define GET_ADC_BY_INPUT_VOLT_MIN				((CUSTOM_INPUT_VOLT_MIN*ADC_MAX_TARGET)/ADC_REF_VOLTAGE)
+#define GET_ADC_BY_INPUT_VOLT_MAX(VREF)		((CUSTOM_INPUT_VOLT_MAX(VREF)*ADC_MAX_TARGET)/VREF)
+#define GET_ADC_BY_INPUT_VOLT_MIN(VREF)		((CUSTOM_INPUT_VOLT_MIN*ADC_MAX_TARGET)/VREF)
 
-#define CALC_DATA_ADC_TO_DUTY(ADC)			(((ADC-GET_ADC_BY_INPUT_VOLT_MIN)*(DUTY_MAX-DUTY_MIN))/(GET_ADC_BY_INPUT_VOLT_MAX-GET_ADC_BY_INPUT_VOLT_MIN))
-#define CALC_DATA_DUTY_TO_ADC(DUTY)			((GET_ADC_BY_INPUT_VOLT_MIN+DUTY*(GET_ADC_BY_INPUT_VOLT_MAX-GET_ADC_BY_INPUT_VOLT_MIN))/(DUTY_MAX-DUTY_MIN))
+#define CALC_DATA_ADC_TO_DUTY(ADC,VREF)		(((ADC-GET_ADC_BY_INPUT_VOLT_MIN(VREF))*(DUTY_MAX-DUTY_MIN))/(GET_ADC_BY_INPUT_VOLT_MAX(VREF)-GET_ADC_BY_INPUT_VOLT_MIN(VREF)))
+#define CALC_DATA_DUTY_TO_ADC(DUTY,VREF)		((GET_ADC_BY_INPUT_VOLT_MIN(VREF)+DUTY*(GET_ADC_BY_INPUT_VOLT_MAX(VREF)-GET_ADC_BY_INPUT_VOLT_MIN(VREF)))/(DUTY_MAX-DUTY_MIN))
 
 //#define ENABLE_LED_DIMMING_WITH_PWM
 #define ENABLE_CONVERT_ADC_TO_DUTY_DEMO
@@ -311,21 +311,23 @@ uint16_t ADC_ConvertChannel(void)
 	adc_value = (adc_value <= ADC_CONVERT_TARGET) ? (ADC_CONVERT_TARGET) : (adc_value); 
 	adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
 
-	printf("ADC: 0x%4X (%e v)\r\n",adc_value , ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd));	
-//	printf("ADC: 0x%4X (%e ,%e)\r\n",adc_value , Bandgap_Voltage,AVdd);
-	
 	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
 	target_value = adc_value;
 
-	target_value = (target_value <= GET_ADC_BY_INPUT_VOLT_MIN) ? (GET_ADC_BY_INPUT_VOLT_MIN) : (target_value); 
-	target_value = (target_value >= GET_ADC_BY_INPUT_VOLT_MAX) ? (GET_ADC_BY_INPUT_VOLT_MAX) : (target_value); 
+	target_value = (target_value <= GET_ADC_BY_INPUT_VOLT_MIN(AVdd)) ? (GET_ADC_BY_INPUT_VOLT_MIN(AVdd)) : (target_value); 
+	target_value = (target_value >= GET_ADC_BY_INPUT_VOLT_MAX(AVdd)) ? (GET_ADC_BY_INPUT_VOLT_MAX(AVdd)) : (target_value); 
 
-	duty_value = CALC_DATA_ADC_TO_DUTY(target_value);
+	duty_value = CALC_DATA_ADC_TO_DUTY(target_value,AVdd);
 	PWM0_CH1_SetDuty(duty_value);
 	//for quick demo
 	PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
 
-	printf("DUTY:%d,%d,%d\r\n",duty_value , target_value , adc_value );
+	printf("DUTY:%2d,ADC : %4d ,ADC within range:%4d (VREF : %e v)\r\n",duty_value , adc_value, target_value ,ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd) );
+
+	#else 
+	
+	printf("ADC: 0x%4X (%e v)\r\n",adc_value , ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd));	
+//	printf("ADC: 0x%4X (%e ,%e)\r\n",adc_value , Bandgap_Voltage,AVdd);
 
 	#endif	
 

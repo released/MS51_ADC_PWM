@@ -2,13 +2,15 @@
 
 update @ 2019/06/03
 
-Add 2 define (ENABLE_LED_DIMMING_WITH_PWM , ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+Add 2 define (ENABLE_LED_DIMMING_WITH_PWM , ENABLE_CONVERT_ADC_TO_DUTY_DEMO) for demo purpose
 
 - ENABLE_LED_DIMMING_WITH_PWM : original demo , LED dimming with PWM function
 
-- ENABLE_CONVERT_ADC_TO_DUTY_DEMO : add ADC convert to PWM duty , check CUSTOM_INPUT_VOLT_MAX , CUSTOM_INPUT_VOLT_MIN for customize define voltage
+- ENABLE_CONVERT_ADC_TO_DUTY_DEMO : add ADC convert to PWM duty , check CUSTOM_INPUT_VOLT_MIN for customize define lower limit voltage
 
------------------------------------------------------------------------------------
+- ADC reference voltage calculate dynamically (follow on MCU voltage)
+
+----------------------------------------
 
 update @ 2019/04/30
 
