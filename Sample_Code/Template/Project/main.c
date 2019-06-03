@@ -43,34 +43,45 @@ typedef enum
 
 #define LED_REVERSE(x)							(100-x)			// because lED in EVM schematic , need to reverse level
 
-#define TIMER_LOG_MS							(1000)
-#define ADC_SAMPLETIME_MS						(20)
-#define GPIO_TOGGLE_MS							(500)
+#define TIMER_LOG_MS							(1000ul)
+#define ADC_SAMPLETIME_MS						(20ul)
+#define GPIO_TOGGLE_MS							(500ul)
 
-#define ADC_RESOLUTION							(uint16_t)(4096u)
-#define ADC_REF_VOLTAGE							(uint16_t)(3300u)	//(float)(3.3f)
+#define ADC_RESOLUTION							(4096ul)
+#define ADC_REF_VOLTAGE							(3300ul)	//(float)(3.3f)
 
-#define ADC_MAX_TARGET							(uint16_t)(4095u)	//(float)(2.612f)
-#define ADC_MIN_TARGET							(uint16_t)(0u)	//(float)(0.423f)
+#define ADC_MAX_TARGET							(4095ul)	//(float)(2.612f)
+#define ADC_MIN_TARGET							(0ul)	//(float)(0.423f)
 
-#define DUTY_MAX								(uint16_t)(100)
-#define DUTY_MIN								(uint16_t)(0)
+#define DUTY_MAX								(100ul)
+#define DUTY_MIN								(0ul)
 #define ADC_CONVERT_TARGET						(float)(ADC_MIN_TARGET*ADC_RESOLUTION/ADC_REF_VOLTAGE) //81.92000 
 //#define ADC_SUB_TARGET							(float)((ADC_MAX_TARGET-ADC_MIN_TARGET)/(DUTY_MAX-DUTY_MIN)*(ADC_RESOLUTION/ADC_REF_VOLTAGE))//5.60505 
 //#define ADCInputV_Sub							(float)	((ADC_MAX_BRIGHT-ADC_MIN_BRIGHT)/(DUTY_MAX-DUTY_MIN)) //0.02737 
 
-#define ADC_SAMPLE_COUNT 						(uint16_t)(16)		// 8
-#define ADC_SAMPLE_POWER 						(uint8_t)(4)			//(5)	 	// 3	,// 2 ^ ?
+#define ADC_SAMPLE_COUNT 						(16ul)			// 8
+#define ADC_SAMPLE_POWER 						(4ul)			//(5)	 	// 3	,// 2 ^ ?
 
 #define ADC_DIGITAL_SCALE(void) 					(0xFFFU >> ((0) >> (3U - 1U)))		//0: 12 BIT 
 #define ADC_CALC_DATA_TO_VOLTAGE(DATA,VREF) 	((DATA) * (VREF) / ADC_DIGITAL_SCALE())
+
+#define CUSTOM_INPUT_VOLT_MAX					(3300ul)
+#define CUSTOM_INPUT_VOLT_MIN					(2300ul)
+
+#define GET_ADC_BY_INPUT_VOLT_MAX				((CUSTOM_INPUT_VOLT_MAX*ADC_MAX_TARGET)/ADC_REF_VOLTAGE)
+#define GET_ADC_BY_INPUT_VOLT_MIN				((CUSTOM_INPUT_VOLT_MIN*ADC_MAX_TARGET)/ADC_REF_VOLTAGE)
+
+#define CALC_DATA_ADC_TO_DUTY(ADC)			(((ADC-GET_ADC_BY_INPUT_VOLT_MIN)*(DUTY_MAX-DUTY_MIN))/(GET_ADC_BY_INPUT_VOLT_MAX-GET_ADC_BY_INPUT_VOLT_MIN))
+#define CALC_DATA_DUTY_TO_ADC(DUTY)			((GET_ADC_BY_INPUT_VOLT_MIN+DUTY*(GET_ADC_BY_INPUT_VOLT_MAX-GET_ADC_BY_INPUT_VOLT_MIN))/(DUTY_MAX-DUTY_MIN))
+
+//#define ENABLE_LED_DIMMING_WITH_PWM
+#define ENABLE_CONVERT_ADC_TO_DUTY_DEMO
 
 uint8_t 	u8TH0_Tmp = 0;
 uint8_t 	u8TL0_Tmp = 0;
 
 uint8_t 	DUTY_LED = 0;
 uint8_t 	FLAG_LED = 1;
-uint8_t 	CNT_LED = 0;
 
 double  Bandgap_Voltage,AVdd,Bandgap_Value;      //please always use "double" mode for this
 unsigned char xdata ADCdataVBGH, ADCdataVBGL;
@@ -80,6 +91,36 @@ uint32_t movingAverageSum_Target = 0;
 uint8_t ADCDataReady = 0;
 
 ADC_DataState_TypeDef ADCDataState = ADC_DataState_DEFAULT;
+
+
+void SendString(uint8_t* Data)
+{
+	#if 1
+	uint16_t i = 0;
+
+	while (Data[i] != '\0')
+	{
+		UART_Send_Data(UART0,Data[i++]);		
+	}
+
+	#endif
+
+	#if 0
+	uint16_t i = 0;
+	
+	for(i = 0;i< (strlen(Data)) ;i++ )
+	{
+		UART_Send_Data(UART0,Data[i]);
+	}
+	#endif
+
+	#if 0
+    while(*Data)  
+    {  
+        UART_Send_Data(UART0, (unsigned char) *Data++);  
+    } 
+	#endif
+}
 
 
 void GPIO_Toggle(void)
@@ -101,6 +142,67 @@ void GPIO_Toggle(void)
 void GPIO_Init(void)
 {
     P05_PUSHPULL_MODE;
+}
+
+void PWM0_CH1_SetDuty(uint16_t d)
+{
+    PWM1H = HIBYTE(d);
+    PWM1L = LOBYTE(d);
+
+    set_PWMCON0_LOAD;
+    set_PWMCON0_PWMRUN;	
+}
+
+void PWM0_CH0_SetDuty(uint16_t d)
+{
+    PWM0H = HIBYTE(d);
+    PWM0L = LOBYTE(d);
+
+    set_PWMCON0_LOAD;
+    set_PWMCON0_PWMRUN;	
+}
+
+void PWM0_CHx_Init(uint16_t uFrequency)
+{
+    PWM1_P11_OUTPUT_ENABLE;	
+    PWM0_P12_OUTPUT_ENABLE;
+  
+    PWM_IMDEPENDENT_MODE;
+    PWM_CLOCK_DIV_16;
+
+/*
+	PWM frequency   = Fpwm/((PWMPH,PWMPL)+1) = (24MHz/2)/(PWMPH,PWMPL)+1) = 20KHz
+*/	
+    PWMPH = HIBYTE((SYS_CLOCK>>4)/uFrequency-1);
+    PWMPL = LOBYTE((SYS_CLOCK>>4)/uFrequency-1);
+
+	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
+	
+	PWM0_CH0_SetDuty(LED_REVERSE(0));	
+
+	PWM0_CH1_SetDuty(0);
+}
+
+void PWM0_LED_DIMMING(void)
+{
+	PWM0_CH0_SetDuty(LED_REVERSE(DUTY_LED));
+//	printf("DUTY:%d\r\n" ,DUTY_LED );
+	if (FLAG_LED)
+	{
+		if ( ++DUTY_LED == 100)
+		{
+			FLAG_LED = 0;
+			DUTY_LED = 100;
+		}
+	}
+	else
+	{
+		if ( --DUTY_LED == 0)
+		{
+			FLAG_LED = 1;
+			DUTY_LED = 0;
+		}			
+	}
 }
 
 void ADC_ReadAVdd(void)
@@ -202,22 +304,30 @@ uint16_t ADC_ConvertChannel(void)
 {
 	volatile uint16_t adc_value = 0;
 	volatile uint16_t duty_value = 0;
-	volatile uint16_t adcRawData_Target = 0;
+	volatile uint16_t target_value = 0;
 
 	adc_value = ADC_ModifiedMovingAverage((((ADCRH<<4) + ADCRL)>>1)<<1);
+
+	adc_value = (adc_value <= ADC_CONVERT_TARGET) ? (ADC_CONVERT_TARGET) : (adc_value); 
+	adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
 
 	printf("ADC: 0x%4X (%e v)\r\n",adc_value , ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd));	
 //	printf("ADC: 0x%4X (%e ,%e)\r\n",adc_value , Bandgap_Voltage,AVdd);
 	
-	if (adc_value <= ADC_CONVERT_TARGET)
-	{
-		adc_value = ADC_CONVERT_TARGET;
-	}
+	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+	target_value = adc_value;
 
-	if (adc_value >= ADC_RESOLUTION)
-	{
-		adc_value = ADC_RESOLUTION;
-	}
+	target_value = (target_value <= GET_ADC_BY_INPUT_VOLT_MIN) ? (GET_ADC_BY_INPUT_VOLT_MIN) : (target_value); 
+	target_value = (target_value >= GET_ADC_BY_INPUT_VOLT_MAX) ? (GET_ADC_BY_INPUT_VOLT_MAX) : (target_value); 
+
+	duty_value = CALC_DATA_ADC_TO_DUTY(target_value);
+	PWM0_CH1_SetDuty(duty_value);
+	//for quick demo
+	PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
+
+	printf("DUTY:%d,%d,%d\r\n",duty_value , target_value , adc_value );
+
+	#endif	
 
 	set_ADCCON0_ADCS; //after convert , trigger again
 	
@@ -296,75 +406,20 @@ void ADC_InitChannel(uint8_t CH)
 
 }
 
-void PWM0_CH1_SetDuty(uint16_t d)
-{
-    PWM1H = HIBYTE(d);
-    PWM1L = LOBYTE(d);
-
-    set_PWMCON0_LOAD;
-    set_PWMCON0_PWMRUN;	
-}
-
-void PWM0_CH0_SetDuty(uint16_t d)
-{
-    PWM0H = HIBYTE(d);
-    PWM0L = LOBYTE(d);
-
-    set_PWMCON0_LOAD;
-    set_PWMCON0_PWMRUN;
-	
-}
-
-void PWM0_CHx_Init(uint16_t uFrequency)
-{
-    PWM1_P11_OUTPUT_ENABLE;	
-    PWM0_P12_OUTPUT_ENABLE;
-  
-    PWM_IMDEPENDENT_MODE;
-    PWM_CLOCK_DIV_16;
-
-/*
-	PWM frequency   = Fpwm/((PWMPH,PWMPL)+1) = (24MHz/2)/(PWMPH,PWMPL)+1) = 20KHz
-*/	
-    PWMPH = HIBYTE((SYS_CLOCK>>4)/uFrequency-1);
-    PWMPL = LOBYTE((SYS_CLOCK>>4)/uFrequency-1);
-
-	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
-	
-	PWM0_CH0_SetDuty(LED_REVERSE(0));	
-
-	PWM0_CH1_SetDuty(50);
-}
-
-
 void Timer0_IRQHandler(void)
 {
 //	static uint16_t LOG_TIMER = 0;
 	static uint16_t CNT_TIMER = 0;
 	static uint16_t CNT_ADC = 0;
 	static uint16_t CNT_GPIO = 0;
-	
+	static uint16_t CNT_LED = 0;
+
 	if (CNT_LED++ >= 18)
 	{		
 		CNT_LED = 0;
-		PWM0_CH0_SetDuty(LED_REVERSE(DUTY_LED));
-//		printf("DUTY:%d\r\n" ,DUTY_LED );
-		if (FLAG_LED)
-		{
-			if ( ++DUTY_LED == 100)
-			{
-				FLAG_LED = 0;
-				DUTY_LED = 100;
-			}
-		}
-		else
-		{
-			if ( --DUTY_LED == 0)
-			{
-				FLAG_LED = 1;
-				DUTY_LED = 0;
-			}			
-		}
+		#if defined (ENABLE_LED_DIMMING_WITH_PWM)
+		PWM0_LED_DIMMING();
+		#endif
 	}
 
 	if (CNT_GPIO++ >= GPIO_TOGGLE_MS)
@@ -383,6 +438,7 @@ void Timer0_IRQHandler(void)
 	{		
 		CNT_TIMER = 0;
 //    	printf("LOG:%d\r\n",LOG_TIMER++);
+//		SendString("LOG_TIMER\r\n");
 	}
 
 }
@@ -435,7 +491,7 @@ void main (void)
     UART0_Init();
 
 	PWM0_CHx_Init(PWM_FREQ);	//P1.2 , PWM0_CH0  , LED1
-								//P1.1 , PWM0_CH1  , fix duty
+								//P1.1 , PWM0_CH1
 
 	ADC_InitChannel(ADC_CH5);	//P0.4 , ADC_CH5
 

@@ -1,5 +1,15 @@
 # MS51_ADC_PWM
 
+update @ 2019/06/03
+
+Add 2 define (ENABLE_LED_DIMMING_WITH_PWM , ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+
+- ENABLE_LED_DIMMING_WITH_PWM : original demo , LED dimming with PWM function
+
+- ENABLE_CONVERT_ADC_TO_DUTY_DEMO : add ADC convert to PWM duty , check CUSTOM_INPUT_VOLT_MAX , CUSTOM_INPUT_VOLT_MIN for customize define voltage
+
+-----------------------------------------------------------------------------------
+
 update @ 2019/04/30
 
 Add ADC (interrupt trigger) sample code for MS51 (P0.4)
