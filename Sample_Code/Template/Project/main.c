@@ -146,8 +146,11 @@ void GPIO_Init(void)
 
 void PWM0_CH1_SetDuty(uint16_t d)
 {
-    PWM1H = HIBYTE(d);
-    PWM1L = LOBYTE(d);
+	uint16_t res = 0 ;
+	res = d*(MAKEWORD(PWMPH,PWMPL)+1)/100;
+
+    PWM1H = HIBYTE(res);
+    PWM1L = LOBYTE(res);
 
     set_PWMCON0_LOAD;
     set_PWMCON0_PWMRUN;	
@@ -155,8 +158,11 @@ void PWM0_CH1_SetDuty(uint16_t d)
 
 void PWM0_CH0_SetDuty(uint16_t d)
 {
-    PWM0H = HIBYTE(d);
-    PWM0L = LOBYTE(d);
+	uint16_t res = 0 ;
+	res = d*(MAKEWORD(PWMPH,PWMPL)+1)/100;
+
+    PWM0H = HIBYTE(res);
+    PWM0L = LOBYTE(res);
 
     set_PWMCON0_LOAD;
     set_PWMCON0_PWMRUN;	
@@ -164,7 +170,10 @@ void PWM0_CH0_SetDuty(uint16_t d)
 
 void PWM0_CHx_Init(uint16_t uFrequency)
 {
+	P11_PUSHPULL_MODE;	//Add this to enhance MOS output capability
     PWM1_P11_OUTPUT_ENABLE;	
+
+	P12_PUSHPULL_MODE;	//Add this to enhance MOS output capability
     PWM0_P12_OUTPUT_ENABLE;
   
     PWM_IMDEPENDENT_MODE;
