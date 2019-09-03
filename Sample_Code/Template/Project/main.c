@@ -17,18 +17,18 @@
 #include "MS51.h"
 
 enum{
-	ADC_CH0 = 0 ,
-	ADC_CH1 ,
-	ADC_CH2 ,
-	ADC_CH3 ,	
+	TARGET_CH0 = 0 ,
+	TARGET_CH1 ,
+	TARGET_CH2 ,
+	TARGET_CH3 ,	
 	
-	ADC_CH4 ,
-	ADC_CH5 ,
-	ADC_CH6 ,
-	ADC_CH7 ,
+	TARGET_CH4 ,
+	TARGET_CH5 ,
+	TARGET_CH6 ,
+	TARGET_CH7 ,
 
-	ADC_CH_DEFAULT	
-}ADC_CH_TypeDef;
+	TARGET_CH_DEFAULT	
+}Channel_TypeDef;
 
 typedef enum
 {
@@ -54,25 +54,16 @@ typedef enum
 #define ADC_MIN_TARGET							(0ul)	//(float)(0.423f)
 
 #define DUTY_MAX								(100ul)
-#define DUTY_MIN								(0ul)
+#define DUTY_MIN								(1ul)
 #define ADC_CONVERT_TARGET						(float)(ADC_MIN_TARGET*ADC_RESOLUTION/ADC_REF_VOLTAGE) //81.92000 
-//#define ADC_SUB_TARGET							(float)((ADC_MAX_TARGET-ADC_MIN_TARGET)/(DUTY_MAX-DUTY_MIN)*(ADC_RESOLUTION/ADC_REF_VOLTAGE))//5.60505 
-//#define ADCInputV_Sub							(float)	((ADC_MAX_BRIGHT-ADC_MIN_BRIGHT)/(DUTY_MAX-DUTY_MIN)) //0.02737 
 
 #define ADC_SAMPLE_COUNT 						(16ul)			// 8
 #define ADC_SAMPLE_POWER 						(4ul)			//(5)	 	// 3	,// 2 ^ ?
 
+#define CUSTOM_INPUT_VOLT_MAX(VREF)			(2350ul)	//(VREF)			//(3300ul)
+#define CUSTOM_INPUT_VOLT_MIN					(600ul)
+
 #define ADC_DIGITAL_SCALE(void) 					(0xFFFU >> ((0) >> (3U - 1U)))		//0: 12 BIT 
-#define ADC_CALC_DATA_TO_VOLTAGE(DATA,VREF) 	((DATA) * (VREF) / ADC_DIGITAL_SCALE())
-
-#define CUSTOM_INPUT_VOLT_MAX(VREF)			(VREF)			//(3300ul)
-#define CUSTOM_INPUT_VOLT_MIN					(1300ul)
-
-#define GET_ADC_BY_INPUT_VOLT_MAX(VREF)		((CUSTOM_INPUT_VOLT_MAX(VREF)*ADC_MAX_TARGET)/VREF)
-#define GET_ADC_BY_INPUT_VOLT_MIN(VREF)		((CUSTOM_INPUT_VOLT_MIN*ADC_MAX_TARGET)/VREF)
-
-#define CALC_DATA_ADC_TO_DUTY(ADC,VREF)		(((ADC-GET_ADC_BY_INPUT_VOLT_MIN(VREF))*(DUTY_MAX-DUTY_MIN))/(GET_ADC_BY_INPUT_VOLT_MAX(VREF)-GET_ADC_BY_INPUT_VOLT_MIN(VREF)))
-#define CALC_DATA_DUTY_TO_ADC(DUTY,VREF)		((GET_ADC_BY_INPUT_VOLT_MIN(VREF)+DUTY*(GET_ADC_BY_INPUT_VOLT_MAX(VREF)-GET_ADC_BY_INPUT_VOLT_MIN(VREF)))/(DUTY_MAX-DUTY_MIN))
 
 //#define ENABLE_LED_DIMMING_WITH_PWM
 #define ENABLE_CONVERT_ADC_TO_DUTY_DEMO
@@ -87,8 +78,9 @@ double  Bandgap_Voltage,AVdd,Bandgap_Value;      //please always use "double" mo
 unsigned char xdata ADCdataVBGH, ADCdataVBGL;
 
 uint16_t movingAverage_Target = 0;
-uint32_t movingAverageSum_Target = 0;
+unsigned long int movingAverageSum_Target = 0;
 uint8_t ADCDataReady = 0;
+uint16_t adc_data = 0;
 
 ADC_DataState_TypeDef ADCDataState = ADC_DataState_DEFAULT;
 
@@ -131,7 +123,8 @@ void GPIO_Toggle(void)
 	{
 		P05 = 1;
 		flag = 0;
-	}
+	
+}
 	else
 	{
 		P05 = 0;
@@ -185,7 +178,7 @@ void PWM0_CHx_Init(uint16_t uFrequency)
     PWMPH = HIBYTE((SYS_CLOCK>>4)/uFrequency-1);
     PWMPL = LOBYTE((SYS_CLOCK>>4)/uFrequency-1);
 
-	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
+//	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
 	
 	PWM0_CH0_SetDuty(LED_REVERSE(0));	
 
@@ -267,13 +260,16 @@ void ADC_DataReady(uint8_t on)
 	ADCDataReady = on;
 }
 
-uint16_t ADC_ModifiedMovingAverage (uint16_t d)
+uint16_t ADC_ModifiedMovingAverage (void)
 {
 	static uint16_t cnt = 0;
-
+	uint16_t d = 0;
+	
 	if (Is_ADC_DataReady())
 	{
 		ADC_DataReady(0);
+
+		d = adc_data;
 		
 		switch(ADCDataState)
 		{
@@ -292,7 +288,7 @@ uint16_t ADC_ModifiedMovingAverage (uint16_t d)
 				movingAverageSum_Target += d;
 				movingAverage_Target = movingAverageSum_Target >> ADC_SAMPLE_POWER ;	//	/ADC_SAMPLE_COUNT;
 	
-//				printf("Average : %d\r\n" , movingAverage);
+//				printf("Average : %d\r\n" , movingAverage_Target);
 				break;				
 		}
 	}	
@@ -309,45 +305,78 @@ void ADC_MMA_Initial(void)
 	ADC_DataReady(0);
 }
 
+uint16_t ADC_To_Voltage(uint16_t adc_value)
+{
+	uint16_t volt = 0;
+
+	volt = (AVdd*adc_value)/ADC_DIGITAL_SCALE();
+	
+	printf("input:%4d,volt : %4d mv\r\n",adc_value,volt);
+
+	return volt;	
+}
+
+uint16_t ADC_To_Duty(uint16_t adc_value)
+{
+	uint16_t adc_max = 0;
+	uint16_t adc_min = 0;
+	uint16_t volt_max = CUSTOM_INPUT_VOLT_MAX(0);
+	uint16_t volt_min = CUSTOM_INPUT_VOLT_MIN;
+	uint16_t duty = 0;
+	uint16_t adc_target = 0;	
+	uint16_t interval = DUTY_MAX - DUTY_MIN + 1;	
+	
+	adc_max = (ADC_RESOLUTION * volt_max)/ADC_REF_VOLTAGE ;
+	adc_min = (ADC_RESOLUTION * volt_min)/ADC_REF_VOLTAGE ;	
+	
+	adc_target = (adc_value <= adc_min) ? (adc_min) : (adc_value) ;
+	adc_target = (adc_target >= adc_max) ? (adc_max) : (adc_target) ;
+
+	duty = (float)(adc_target - adc_min)*interval/(adc_max - adc_min) + 1;
+	duty = (duty >= DUTY_MAX) ? (DUTY_MAX) : (duty) ;
+	
+	printf("adc_value:%4d,adc_min:%4d,adc_max:%4d,adc_target : %4d , duty : %3d \r\n",adc_value,adc_min,adc_max , adc_target , duty);
+
+	return duty;	
+}
+
+
 uint16_t ADC_ConvertChannel(void)
 {
 	volatile uint16_t adc_value = 0;
 	volatile uint16_t duty_value = 0;
 	volatile uint16_t target_value = 0;
 
-	adc_value = ADC_ModifiedMovingAverage((((ADCRH<<4) + ADCRL)>>1)<<1);
+	adc_value = ADC_ModifiedMovingAverage();
 
 	adc_value = (adc_value <= ADC_CONVERT_TARGET) ? (ADC_CONVERT_TARGET) : (adc_value); 
 	adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
-
-	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
 	target_value = adc_value;
 
-	target_value = (target_value <= GET_ADC_BY_INPUT_VOLT_MIN(AVdd)) ? (GET_ADC_BY_INPUT_VOLT_MIN(AVdd)) : (target_value); 
-	target_value = (target_value >= GET_ADC_BY_INPUT_VOLT_MAX(AVdd)) ? (GET_ADC_BY_INPUT_VOLT_MAX(AVdd)) : (target_value); 
-
-	duty_value = CALC_DATA_ADC_TO_DUTY(target_value,AVdd);
+	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+	duty_value = ADC_To_Duty(target_value);
+	
 	PWM0_CH1_SetDuty(duty_value);
 	//for quick demo
 	PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
 
-	printf("DUTY:%2d,ADC : %4d ,ADC within range:%4d (VREF : %e v)\r\n",duty_value , adc_value, target_value ,ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd) );
+	#else
 
-	#else 
-	
-	printf("ADC: 0x%4X (%e v)\r\n",adc_value , ADC_CALC_DATA_TO_VOLTAGE(adc_value,AVdd));	
-//	printf("ADC: 0x%4X (%e ,%e)\r\n",adc_value , Bandgap_Voltage,AVdd);
+	ADC_To_Voltage(target_value);
 
-	#endif	
+	#endif
 
 	set_ADCCON0_ADCS; //after convert , trigger again
 	
-	return adc_value;
+	return target_value;
 }
 
 void ADC_ISR(void) interrupt 11          // Vector @  0x5B
 {
-	ADC_DataReady(1);
+	//	adc_data = ((ADCRH<<4) + ADCRL);	
+	adc_data = (((ADCRH<<4) + ADCRL)>>1)<<1;
+
+	ADC_DataReady(1);	
     clr_ADCCON0_ADCF; //clear ADC interrupt flag
 }
 
@@ -357,35 +386,35 @@ void ADC_InitChannel(uint8_t CH)
 
 	switch(CH)
 	{
-		case ADC_CH0: 
+		case TARGET_CH0: 
 		    ENABLE_ADC_AIN0;
 			break;
 
-		case ADC_CH1: 
+		case TARGET_CH1: 
 		    ENABLE_ADC_AIN1;
 			break;
 
-		case ADC_CH2: 
+		case TARGET_CH2: 
 		    ENABLE_ADC_AIN2;
 			break;
 
-		case ADC_CH3: 
+		case TARGET_CH3: 
 		    ENABLE_ADC_AIN3;
 			break;
 
-		case ADC_CH4: 
+		case TARGET_CH4: 
 		    ENABLE_ADC_AIN4;
 			break;
 
-		case ADC_CH5: 
+		case TARGET_CH5: 
 		    ENABLE_ADC_AIN5;
 			break;
 
-		case ADC_CH6: 
+		case TARGET_CH6: 
 		    ENABLE_ADC_AIN6;
 			break;
 
-		case ADC_CH7: 
+		case TARGET_CH7: 
 		    ENABLE_ADC_AIN7;
 			break;		
 		
@@ -504,7 +533,7 @@ void main (void)
 	PWM0_CHx_Init(PWM_FREQ);	//P1.2 , PWM0_CH0  , LED1
 								//P1.1 , PWM0_CH1
 
-	ADC_InitChannel(ADC_CH5);	//P0.4 , ADC_CH5
+	ADC_InitChannel(TARGET_CH5);	//P0.4 , ADC_CH5
 
 	GPIO_Init();					//P05 , GPIO
 			

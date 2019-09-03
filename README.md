@@ -1,5 +1,13 @@
 # MS51_ADC_PWM
 
+update @ 2019/09/03
+
+Add 2 function : ADC_To_Duty , ADC_To_Voltage
+
+Fix get data sequence : convert adc_data at ADC_ISR , and use at ADC_ModifiedMovingAverage
+
+----------------------------------------
+
 update @ 2019/06/03
 
 Add 2 define (ENABLE_LED_DIMMING_WITH_PWM , ENABLE_CONVERT_ADC_TO_DUTY_DEMO) for demo purpose
