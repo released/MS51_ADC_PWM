@@ -1,5 +1,21 @@
 # MS51_ADC_PWM
 
+update @ 2020/01/06
+
+update MS51 driver to Keil_V1.00.003 , by test in MS51 TSSOP20 EVM
+
+Add 2 define : ENABLE_ADC_MMA , ENABLE_ADC_DROP_AVG
+
+- ENABLE_ADC_MMA : original adc convert data , with modified moving average algorithm 
+
+- ENABLE_ADC_DROP_AVG : drop the first few adc convert data , and start average , in a loop
+
+Simply the driver to main.c , reduce code size (HIRC , TIMER0 , UART , and print message)
+
+Revies adc_ref_voltage and adc_convert_target , to calculate dynamically , instead of using DEFINE
+
+----------------------------------------
+
 update @ 2019/09/03
 
 Add 2 function : ADC_To_Duty , ADC_To_Voltage

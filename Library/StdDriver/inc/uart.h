@@ -5,5 +5,8 @@
 #define UART1 1
 
 void UART_Open(unsigned long u32SysClock, unsigned char u8UARTPort,unsigned long u32Baudrate);
-void UART_Send_Data(UINT8 UARTPort, UINT8 c);
+void UART_Send_Data(unsigned char UARTPort, unsigned char c);
 unsigned char Receive_Data(unsigned char UARTPort);
+
+extern   bit PRINTFG,uart0_receive_flag,uart1_receive_flag;
+extern   unsigned char uart0_receive_data,uart1_receive_data;

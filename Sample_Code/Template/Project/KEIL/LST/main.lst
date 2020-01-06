@@ -1,0 +1,875 @@
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 1   
+
+
+C51 COMPILER V9.55, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Output\main.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE ..\main.c LARGE OPTIMIZE(7,SPEED) BROWSE INCDIR(..\..\..\..\Library\Devi
+                    -ce\Include;..\..\..\..\Library\StdDriver\inc) DEBUG OBJECTEXTEND PRINT(.\LST\main.lst) TABS(2) OBJECT(.\Output\main.obj)
+
+line level    source
+
+   1          /*--------------------------------------------------------------------------------------------------------
+             --*/
+   2          /*                                                                                                        
+             - */
+   3          /* Copyright(c) 2019 Nuvoton Technology Corp. All rights reserved.                                        
+             - */
+   4          /*                                                                                                        
+             - */
+   5          /*--------------------------------------------------------------------------------------------------------
+             --*/
+   6          
+   7          /*********************************************************************************************************
+             -**/
+   8          /* Website: http://www.nuvoton.com                                                                        
+             - */
+   9          /*  E-Mail : MicroC-8bit@nuvoton.com                                                                      
+             - */
+  10          /*  Date   : Jan/21/2019                                                                                  
+             - */
+  11          /*********************************************************************************************************
+             -**/
+  12          
+  13          /*********************************************************************************************************
+             -***/
+  14          /*  File Function: MS51 DEMO project                                                                      
+             -  */
+  15          /*********************************************************************************************************
+             -***/
+  16          
+  17          #include "MS51_16K.h"
+  18          
+  19          enum{
+  20            TARGET_CH0 = 0 ,
+  21            TARGET_CH1 ,
+  22            TARGET_CH2 ,
+  23            TARGET_CH3 ,  
+  24            
+  25            TARGET_CH4 ,
+  26            TARGET_CH5 ,
+  27            TARGET_CH6 ,
+  28            TARGET_CH7 ,
+  29          
+  30            TARGET_CH_DEFAULT 
+  31          }Channel_TypeDef;
+  32          
+  33          typedef enum
+  34          {
+  35            ADC_DataState_AVERAGE = 0 ,
+  36            ADC_DataState_MMA , 
+  37            ADC_DataState_DROP , 
+  38            
+  39            ADC_DataState_DEFAULT   
+  40          }ADC_DataState_TypeDef;
+  41          
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 2   
+
+  42          
+  43          //#define ENABLE_16MHz
+  44          #define ENABLE_24MHz
+  45          
+  46          #if defined (ENABLE_16MHz)
+              #define SYS_CLOCK                 (16000000ul)
+              #elif defined (ENABLE_24MHz)
+  49          #define SYS_CLOCK                 (24000000ul)
+  50          #endif
+  51          
+  52          #define PWM_FREQ                (15000ul)
+  53          
+  54          #define LED_REVERSE(x)              (100-x)     // because lED in EVM schematic , need to reverse level
+  55          
+  56          #define TIMER_LOG_MS              (1000ul)
+  57          //#define ADC_SAMPLETIME_MS           (20ul)
+  58          #define GPIO_TOGGLE_MS              (500ul)
+  59          
+  60          #define ADC_RESOLUTION              (4096ul)
+  61          //#define ADC_REF_VOLTAGE             (3300ul)  //(float)(3.3f)
+  62          
+  63          #define ADC_MAX_TARGET              (4095ul)  //(float)(2.612f)
+  64          #define ADC_MIN_TARGET              (0ul) //(float)(0.423f)
+  65          
+  66          #define DUTY_MAX                (100ul)
+  67          #define DUTY_MIN                (1ul)
+  68          //#define ADC_CONVERT_TARGET            (float)(ADC_MIN_TARGET*ADC_RESOLUTION/ADC_REF_VOLTAGE) //81.92000 
+  69          
+  70          #define ADC_SAMPLE_COUNT            (8ul)     // 8
+  71          #define ADC_SAMPLE_POWER            (3ul)     //(5)   // 3  ,// 2 ^ ?
+  72          #define ADC_SAMPLE_DROP             (4ul)
+  73          
+  74          #define CUSTOM_INPUT_VOLT_MAX(VREF)     (VREF)      //(3300ul)
+  75          #define CUSTOM_INPUT_VOLT_MIN         (0) //(600ul)
+  76          
+  77          #define ADC_DIGITAL_SCALE(void)           (0xFFFU >> ((0) >> (3U - 1U)))    //0: 12 BIT 
+  78          
+  79          //#define ENABLE_LED_DIMMING_WITH_PWM
+  80          #define ENABLE_CONVERT_ADC_TO_DUTY_DEMO
+  81          
+  82          //#define ENABLE_ADC_MMA
+  83          #define ENABLE_ADC_DROP_AVG
+  84          
+  85          uint8_t   u8TH0_Tmp = 0;
+  86          uint8_t   u8TL0_Tmp = 0;
+  87          
+  88          uint8_t   DUTY_LED = 0;
+  89          
+  90          
+  91          //UART 0
+  92          bit BIT_TMP;
+  93          bit BIT_UART;
+  94          bit uart0_receive_flag=0;
+  95          unsigned char uart0_receive_data;
+  96          
+  97          double  Bandgap_Voltage,AVdd,Bandgap_Value;      //please always use "double" mode for this
+  98          unsigned char xdata ADCdataVBGH, ADCdataVBGL;
+  99          
+ 100          uint16_t adc_target = 0;
+ 101          unsigned long int adc_sum_target = 0;
+ 102          uint16_t adc_data = 0;
+ 103          uint16_t adc_convert_target = 0;
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 3   
+
+ 104          uint16_t adc_ref_voltage = 0;
+ 105          
+ 106          ADC_DataState_TypeDef ADCDataState = ADC_DataState_DEFAULT;
+ 107          
+ 108          typedef enum{
+ 109            flag_LED = 0 ,
+ 110            
+ 111            flag_DEFAULT  
+ 112          }Flag_Index;
+ 113          
+ 114          uint8_t BitFlag = 0;
+ 115          #define BitFlag_ON(flag)              (BitFlag|=flag)
+ 116          #define BitFlag_OFF(flag)             (BitFlag&=~flag)
+ 117          #define BitFlag_READ(flag)              ((BitFlag&flag)?1:0)
+ 118          #define ReadBit(bit)                (uint8_t)(1<<bit)
+ 119          
+ 120          uint8_t is_flag_set(Flag_Index idx)
+ 121          {
+ 122   1        return BitFlag_READ(ReadBit(idx));
+ 123   1      }
+ 124          
+ 125          void set_flag(Flag_Index idx , uint8_t en)
+ 126          {
+ 127   1        if (en)
+ 128   1        {
+ 129   2          BitFlag_ON(ReadBit(idx));
+ 130   2        }
+ 131   1        else
+ 132   1        {
+ 133   2          BitFlag_OFF(ReadBit(idx));
+ 134   2        }
+ 135   1      }
+ 136          
+ 137          void send_UARTString(uint8_t* Data)
+ 138          {
+ 139   1        #if 1
+ 140   1        uint16_t i = 0;
+ 141   1      
+ 142   1        while (Data[i] != '\0')
+ 143   1        {
+ 144   2          #if 1
+ 145   2          SBUF = Data[i++];
+ 146   2          #else
+                  UART_Send_Data(UART0,Data[i++]);    
+                  #endif
+ 149   2        }
+ 150   1      
+ 151   1        #endif
+ 152   1      
+ 153   1        #if 0
+                uint16_t i = 0;
+                
+                for(i = 0;i< (strlen(Data)) ;i++ )
+                {
+                  UART_Send_Data(UART0,Data[i]);
+                }
+                #endif
+ 161   1      
+ 162   1        #if 0
+                  while(*Data)  
+                  {  
+                      UART_Send_Data(UART0, (unsigned char) *Data++);  
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 4   
+
+                  } 
+                #endif
+ 168   1      }
+ 169          
+ 170          void send_UARTASCII(uint16_t Temp)
+ 171          {
+ 172   1          uint8_t print_buf[16];
+ 173   1          uint16_t i = 15, j;
+ 174   1      
+ 175   1          *(print_buf + i) = '\0';
+ 176   1          j = (uint16_t)Temp >> 31;
+ 177   1          if(j)
+ 178   1              (uint16_t) Temp = ~(uint16_t)Temp + 1;
+ 179   1          do
+ 180   1          {
+ 181   2              i--;
+ 182   2              *(print_buf + i) = '0' + (uint16_t)Temp % 10;
+ 183   2              (uint16_t)Temp = (uint16_t)Temp / 10;
+ 184   2          }
+ 185   1          while((uint16_t)Temp != 0);
+ 186   1          if(j)
+ 187   1          {
+ 188   2              i--;
+ 189   2              *(print_buf + i) = '-';
+ 190   2          }
+ 191   1          send_UARTString(print_buf + i);
+ 192   1      }
+ 193          
+ 194          
+ 195          void GPIO_Toggle(void)
+ 196          {
+ 197   1          static uint8_t flag = 1;
+ 198   1      
+ 199   1        if (flag)
+ 200   1        {
+ 201   2          P05 = 1;
+ 202   2          flag = 0;
+ 203   2        
+ 204   2      }
+ 205   1        else
+ 206   1        {
+ 207   2          P05 = 0;
+ 208   2          flag = 1;
+ 209   2        }
+ 210   1      }
+ 211          
+ 212          void GPIO_Init(void)
+ 213          {
+ 214   1          P05_PUSHPULL_MODE;
+ 215   1      }
+ 216          
+ 217          void PWM0_CH1_SetDuty(uint16_t d)
+ 218          {
+ 219   1        uint16_t res = 0 ;
+ 220   1        res = d*(MAKEWORD(PWMPH,PWMPL)+1)/100;
+ 221   1      
+ 222   1          PWM1H = HIBYTE(res);
+ 223   1          PWM1L = LOBYTE(res);
+ 224   1      
+ 225   1          set_PWMCON0_LOAD;
+ 226   1          set_PWMCON0_PWMRUN; 
+ 227   1      }
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 5   
+
+ 228          
+ 229          void PWM0_CH0_SetDuty(uint16_t d)
+ 230          {
+ 231   1        uint16_t res = 0 ;
+ 232   1        res = d*(MAKEWORD(PWMPH,PWMPL)+1)/100;
+ 233   1      
+ 234   1          PWM0H = HIBYTE(res);
+ 235   1          PWM0L = LOBYTE(res);
+ 236   1      
+ 237   1          set_PWMCON0_LOAD;
+ 238   1          set_PWMCON0_PWMRUN; 
+ 239   1      }
+ 240          
+ 241          void PWM0_CHx_Init(uint16_t uFrequency)
+ 242          {
+ 243   1        P11_PUSHPULL_MODE;  //Add this to enhance MOS output capability
+ 244   1          PWM1_P11_OUTPUT_ENABLE; 
+ 245   1      
+ 246   1        P12_PUSHPULL_MODE;  //Add this to enhance MOS output capability
+ 247   1          PWM0_P12_OUTPUT_ENABLE;
+ 248   1        
+ 249   1          PWM_IMDEPENDENT_MODE;
+ 250   1          PWM_CLOCK_DIV_16;
+ 251   1      
+ 252   1      /*
+ 253   1        PWM frequency   = Fpwm/((PWMPH,PWMPL)+1) = (24MHz/2)/(PWMPH,PWMPL)+1) = 20KHz
+ 254   1      */  
+ 255   1          PWMPH = HIBYTE((SYS_CLOCK>>4)/uFrequency-1);
+ 256   1          PWMPL = LOBYTE((SYS_CLOCK>>4)/uFrequency-1);
+ 257   1      
+ 258   1      //  printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
+ 259   1      //  send_UARTString("\r\nPWM:");  
+ 260   1      //  send_UARTASCII(PWMPH);
+ 261   1      //  send_UARTString(","); 
+ 262   1      //  send_UARTASCII(PWMPL);
+ 263   1      //  send_UARTString("\r\n\r\n");  
+ 264   1        
+ 265   1        PWM0_CH0_SetDuty(LED_REVERSE(0)); 
+ 266   1      
+ 267   1        PWM0_CH1_SetDuty(0);
+ 268   1      }
+ 269          
+ 270          void PWM0_LED_DIMMING(void)
+ 271          {
+ 272   1        PWM0_CH0_SetDuty(LED_REVERSE(DUTY_LED));
+ 273   1        
+ 274   1      //  printf("DUTY:%d\r\n" ,DUTY_LED );
+ 275   1      //  send_UARTString("DUTY:"); 
+ 276   1      //  send_UARTASCII(DUTY_LED);
+ 277   1      //  send_UARTString("\r\n");
+ 278   1      
+ 279   1        if (is_flag_set(flag_LED))
+ 280   1        {
+ 281   2          if ( ++DUTY_LED == 100)
+ 282   2          {
+ 283   3            set_flag(flag_LED,Disable);
+ 284   3            DUTY_LED = 100;
+ 285   3          }
+ 286   2        }
+ 287   1        else
+ 288   1        {
+ 289   2          if ( --DUTY_LED == 0)
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 6   
+
+ 290   2          {
+ 291   3            set_flag(flag_LED,Enable);
+ 292   3            DUTY_LED = 0;
+ 293   3          }     
+ 294   2        }
+ 295   1      }
+ 296          
+ 297          void ADC_ReadAVdd(void)
+ 298          {
+ 299   1          UINT8 BandgapHigh,BandgapLow,BandgapMark;
+ 300   1          double bgvalue;
+ 301   1      
+ 302   1      /*Read bandgap value */ 
+ 303   1          set_CHPCON_IAPEN;
+ 304   1          IAPCN = READ_UID;
+ 305   1          IAPAL = 0x0d;
+ 306   1          IAPAH = 0x00;
+ 307   1          set_IAPTRG_IAPGO;
+ 308   1          BandgapLow = IAPFD;
+ 309   1          BandgapMark = BandgapLow&0xF0;
+ 310   1          BandgapLow = BandgapLow&0x0F;
+ 311   1          IAPAL = 0x0C;
+ 312   1          IAPAH = 0x00;
+ 313   1          set_IAPTRG_IAPGO;
+ 314   1          BandgapHigh = IAPFD;
+ 315   1          Bandgap_Value = (BandgapHigh<<4)+BandgapLow;
+ 316   1          Bandgap_Voltage= Bandgap_Value*3/4;
+ 317   1          clr_CHPCON_IAPEN;
+ 318   1      
+ 319   1      /* ADC Low speed initial*/  
+ 320   1          ENABLE_ADC_BANDGAP;
+ 321   1          ADCCON1|=0x30;            /* clock divider */
+ 322   1          ADCCON2|=0x0E;            /* AQT time */
+ 323   1          AUXR1|=SET_BIT4;          /* ADC clock low speed */
+ 324   1        
+ 325   1      /*start bandgap ADC */
+ 326   1          clr_ADCCON0_ADCF;
+ 327   1          set_ADCCON0_ADCS;                                
+ 328   1          while(ADCF == 0);
+ 329   1          ADCdataVBGH = ADCRH;
+ 330   1          ADCdataVBGL = ADCRL;
+ 331   1        
+ 332   1      /* to convert VDD value */
+ 333   1          bgvalue = (ADCRH<<4) + ADCRL;
+ 334   1          AVdd = (0x1000/bgvalue)*Bandgap_Voltage;
+ 335   1      
+ 336   1      //    printf ("\r\n BG Voltage = %e\r\n", Bandgap_Voltage); 
+ 337   1      //    printf ("\r\n VDD voltage = %e\r\n", AVdd);   
+ 338   1      }
+ 339          
+ 340          uint16_t ADC_DropAndAverage (uint8_t drop , uint8_t avg)
+ 341          {
+ 342   1        uint8_t n = 0;
+ 343   1      
+ 344   1        switch(ADCDataState)
+ 345   1        {
+ 346   2          case ADC_DataState_DROP:
+ 347   2            for ( n = 0 ; n < drop ; n++)
+ 348   2            {
+ 349   3              while(ADCF);
+ 350   3              adc_data = 0;         
+ 351   3              set_ADCCON0_ADCS; //after convert , trigger again 
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 7   
+
+ 352   3            }       
+ 353   2            ADCDataState = ADC_DataState_AVERAGE;
+ 354   2      
+ 355   2            break;
+ 356   2            
+ 357   2          case ADC_DataState_AVERAGE:
+ 358   2            for ( n = 0 ; n < avg ; n++)
+ 359   2            {
+ 360   3              while(ADCF);
+ 361   3              adc_sum_target += adc_data;         
+ 362   3              set_ADCCON0_ADCS; //after convert , trigger again
+ 363   3            }
+ 364   2            adc_target = adc_sum_target >> ADC_SAMPLE_POWER ;
+ 365   2            break;        
+ 366   2        }
+ 367   1        
+ 368   1        adc_sum_target = 0;
+ 369   1      
+ 370   1        return adc_target;
+ 371   1      }
+ 372          
+ 373          uint16_t ADC_ModifiedMovingAverage (void)
+ 374          {
+ 375   1        static uint16_t cnt = 0;
+ 376   1          
+ 377   1        switch(ADCDataState)
+ 378   1        {
+ 379   2          case ADC_DataState_AVERAGE:
+ 380   2            while(ADCF);
+ 381   2            adc_sum_target += adc_data;
+ 382   2            if (cnt++ >= (ADC_SAMPLE_COUNT-1))
+ 383   2            {
+ 384   3              cnt = 0;
+ 385   3              adc_target = adc_sum_target >> ADC_SAMPLE_POWER ; //  /ADC_SAMPLE_COUNT;;
+ 386   3              ADCDataState = ADC_DataState_MMA;
+ 387   3            }     
+ 388   2            break;
+ 389   2            
+ 390   2          case ADC_DataState_MMA:
+ 391   2            while(ADCF);
+ 392   2            adc_sum_target -=  adc_target;
+ 393   2            adc_sum_target += adc_data;
+ 394   2            adc_target = adc_sum_target >> ADC_SAMPLE_POWER ; //  /ADC_SAMPLE_COUNT;
+ 395   2      
+ 396   2            break;        
+ 397   2        }
+ 398   1        
+ 399   1      
+ 400   1        return adc_target;
+ 401   1      }
+ 402          
+ 403          
+ 404          void ADC_Parameter_Initial(void)
+ 405          {
+ 406   1        #if defined (ENABLE_ADC_MMA)
+                ADCDataState = ADC_DataState_AVERAGE;
+                #endif
+ 409   1          
+ 410   1        #if defined (ENABLE_ADC_DROP_AVG)
+ 411   1        ADCDataState = ADC_DataState_DROP;
+ 412   1        #endif
+ 413   1          
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 8   
+
+ 414   1        adc_sum_target = 0;
+ 415   1        adc_target = 0;
+ 416   1      
+ 417   1      }
+ 418          
+ 419          uint16_t ADC_To_Voltage(uint16_t adc_value)
+ 420          {
+ 421   1        uint16_t volt = 0;
+ 422   1      
+ 423   1        volt = (AVdd*adc_value)/ADC_DIGITAL_SCALE();
+ 424   1        
+ 425   1      //  printf("input:%4d,volt : %4d mv\r\n",adc_value,volt);
+ 426   1        send_UARTString("adc_value:");  
+ 427   1        send_UARTASCII(adc_value);
+ 428   1        send_UARTString(",volt:");
+ 429   1        send_UARTASCII(volt);
+ 430   1        send_UARTString("mv,AVdd:");
+ 431   1        send_UARTASCII(AVdd); 
+ 432   1        send_UARTString("mv\r\n");
+ 433   1      
+ 434   1        return volt;  
+ 435   1      }
+ 436          
+ 437          uint16_t ADC_To_Duty(uint16_t adc_value)
+ 438          {
+ 439   1        uint16_t adc_max = 0;
+ 440   1        uint16_t adc_min = 0;
+ 441   1        uint16_t volt_max = CUSTOM_INPUT_VOLT_MAX(AVdd);//CUSTOM_INPUT_VOLT_MAX(0);
+ 442   1        uint16_t volt_min = CUSTOM_INPUT_VOLT_MIN;
+ 443   1        uint16_t duty = 0;
+ 444   1        uint16_t adc_target = 0;  
+ 445   1        uint16_t interval = DUTY_MAX - DUTY_MIN + 1;  
+ 446   1        adc_ref_voltage = AVdd;
+ 447   1        
+ 448   1        adc_max = (ADC_RESOLUTION * volt_max)/adc_ref_voltage ;
+ 449   1        adc_min = (ADC_RESOLUTION * volt_min)/adc_ref_voltage ; 
+ 450   1        
+ 451   1        adc_target = (adc_value <= adc_min) ? (adc_min) : (adc_value) ;
+ 452   1        adc_target = (adc_target >= adc_max) ? (adc_max) : (adc_target) ;
+ 453   1      
+ 454   1        duty = (float)(adc_target - adc_min)*interval/(adc_max - adc_min) + 1;
+ 455   1        duty = (duty >= DUTY_MAX) ? (DUTY_MAX) : (duty) ;
+ 456   1        
+ 457   1      //  printf("adc_value:%4d,adc_min:%4d,adc_max:%4d,adc_target : %4d , duty : %3d \r\n",adc_value,adc_min,adc
+             -_max , adc_target , duty);
+ 458   1        send_UARTString("adc_value:");  
+ 459   1        send_UARTASCII(adc_value);
+ 460   1        send_UARTString(",adc_min:");
+ 461   1        send_UARTASCII(adc_min);
+ 462   1        send_UARTString(",adc_max:");
+ 463   1        send_UARTASCII(adc_max);
+ 464   1        send_UARTString(",adc_target:");
+ 465   1        send_UARTASCII(adc_target);
+ 466   1        send_UARTString(",duty:");
+ 467   1        send_UARTASCII(duty);
+ 468   1        send_UARTString("\r\n");
+ 469   1      
+ 470   1        return duty;  
+ 471   1      }
+ 472          
+ 473          
+ 474          uint16_t ADC_ConvertChannel(void)
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 9   
+
+ 475          {
+ 476   1        volatile uint16_t adc_value = 0;
+ 477   1        volatile uint16_t duty_value = 0;
+ 478   1        adc_ref_voltage = AVdd;
+ 479   1        
+ 480   1        adc_convert_target = (ADC_MIN_TARGET*ADC_RESOLUTION/adc_ref_voltage);
+ 481   1      
+ 482   1        #if defined (ENABLE_ADC_DROP_AVG)
+ 483   1        adc_value = ADC_DropAndAverage(ADC_SAMPLE_DROP,ADC_SAMPLE_COUNT);
+ 484   1      //  send_UARTString("adc_value (DropAndAverage) :");  
+ 485   1      //  send_UARTASCII(adc_value);
+ 486   1      //  send_UARTString("\r\n");
+ 487   1      
+ 488   1        adc_value = (adc_value <= adc_convert_target) ? (adc_convert_target) : (adc_value); 
+ 489   1        adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
+ 490   1      
+ 491   1        #if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+ 492   1        duty_value = ADC_To_Duty(adc_value);  
+ 493   1        PWM0_CH1_SetDuty(duty_value);
+ 494   1        //for quick demo
+ 495   1        PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
+ 496   1        #else
+                ADC_To_Voltage(adc_value);
+                #endif
+ 499   1      
+ 500   1        
+ 501   1        #endif
+ 502   1        
+ 503   1        #if defined (ENABLE_ADC_MMA)
+                adc_value = ADC_ModifiedMovingAverage();
+              //  send_UARTString("adc_value (MMA) :"); 
+              //  send_UARTASCII(adc_value);
+              //  send_UARTString("\r\n");
+                
+                adc_value = (adc_value <= adc_convert_target) ? (adc_convert_target) : (adc_value); 
+                adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
+              
+                #if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+                duty_value = ADC_To_Duty(adc_value);  
+                PWM0_CH1_SetDuty(duty_value);
+                //for quick demo
+                PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
+                #else
+                ADC_To_Voltage(adc_value);
+                #endif
+              
+                set_ADCCON0_ADCS; //after convert , trigger again
+                #endif
+ 523   1        
+ 524   1        return adc_value;
+ 525   1      }
+ 526          
+ 527          void ADC_ISR(void) interrupt 11          // Vector @  0x5B
+ 528          { 
+ 529   1          _push_(SFRS);
+ 530   1      
+ 531   1      //  adc_data = ((ADCRH<<4) + ADCRL);  
+ 532   1        adc_data = (((ADCRH<<4) + ADCRL)>>1)<<1;
+ 533   1      
+ 534   1      //  send_UARTString("ADC_ISR :"); 
+ 535   1      //  send_UARTASCII(adc_data);
+ 536   1      //  send_UARTString("\r\n");
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 10  
+
+ 537   1      
+ 538   1          clr_ADCCON0_ADCF; //clear ADC interrupt flag
+ 539   1      
+ 540   1           _pop_(SFRS);   
+ 541   1      }
+ 542          
+ 543          void ADC_InitChannel(uint8_t CH)
+ 544          {
+ 545   1        ADC_ReadAVdd();
+ 546   1      
+ 547   1        switch(CH)
+ 548   1        {
+ 549   2          case TARGET_CH0: 
+ 550   2              ENABLE_ADC_AIN0;
+ 551   2            break;
+ 552   2      
+ 553   2          case TARGET_CH1: 
+ 554   2              ENABLE_ADC_AIN1;
+ 555   2            break;
+ 556   2      
+ 557   2          case TARGET_CH2: 
+ 558   2              ENABLE_ADC_AIN2;
+ 559   2            break;
+ 560   2      
+ 561   2          case TARGET_CH3: 
+ 562   2              ENABLE_ADC_AIN3;
+ 563   2            break;
+ 564   2      
+ 565   2          case TARGET_CH4: 
+ 566   2              ENABLE_ADC_AIN4;
+ 567   2            break;
+ 568   2      
+ 569   2          case TARGET_CH5: 
+ 570   2              ENABLE_ADC_AIN5;
+ 571   2            break;
+ 572   2      
+ 573   2          case TARGET_CH6: 
+ 574   2              ENABLE_ADC_AIN6;
+ 575   2            break;
+ 576   2      
+ 577   2          case TARGET_CH7: 
+ 578   2              ENABLE_ADC_AIN7;
+ 579   2            break;    
+ 580   2          
+ 581   2        }
+ 582   1      
+ 583   1        /* ADC Low speed initial*/  
+ 584   1          ADCCON1|=0X30;            /* clock divider */
+ 585   1          ADCCON2|=0X0E;            /* AQT time */
+ 586   1      
+ 587   1        #if 0
+                  AUXR1|=SET_BIT4;          /* ADC clock low speed */
+                #else
+ 590   1          AUXR1 &= ~SET_BIT4;     //high speed , 500k sps
+ 591   1        #endif
+ 592   1      
+ 593   1        clr_ADCCON0_ADCF;
+ 594   1        set_ADCCON0_ADCS;                  // ADC start trig signal
+ 595   1      
+ 596   1        #if 0 //polling
+                while(ADCF == 0);
+                #else // Enable ADC interrupt (if use interrupt)
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 11  
+
+ 599   1          set_IE_EADC;                        
+ 600   1          ENABLE_GLOBAL_INTERRUPT;
+ 601   1        #endif
+ 602   1      
+ 603   1        ADC_Parameter_Initial();
+ 604   1      
+ 605   1      //  return ((ADCRH<<4) + ADCRL);
+ 606   1      
+ 607   1      }
+ 608          
+ 609          void Timer0_IRQHandler(void)
+ 610          {
+ 611   1      //  static uint16_t LOG_TIMER = 0;
+ 612   1      //  static uint16_t CNT_TIMER = 0;
+ 613   1      //  static uint16_t CNT_ADC = 0;
+ 614   1        static uint16_t CNT_GPIO = 0;
+ 615   1        static uint16_t CNT_LED = 0;
+ 616   1      
+ 617   1        if (CNT_LED++ >= 18)
+ 618   1        {   
+ 619   2          CNT_LED = 0;
+ 620   2          #if defined (ENABLE_LED_DIMMING_WITH_PWM)
+                  PWM0_LED_DIMMING();
+                  #endif
+ 623   2        }
+ 624   1      
+ 625   1        if (CNT_GPIO++ >= GPIO_TOGGLE_MS)
+ 626   1        {   
+ 627   2          CNT_GPIO = 0;
+ 628   2          GPIO_Toggle();
+ 629   2        } 
+ 630   1      
+ 631   1      //  if (CNT_ADC++ >= ADC_SAMPLETIME_MS)
+ 632   1      //  {   
+ 633   1      //    CNT_ADC = 0;
+ 634   1      //    ADC_ConvertChannel();
+ 635   1      //  }
+ 636   1      
+ 637   1      //  if (CNT_TIMER++ >= TIMER_LOG_MS)
+ 638   1      //  {   
+ 639   1      //    CNT_TIMER = 0;
+ 640   1      //      printf("LOG:%d\r\n",LOG_TIMER++);
+ 641   1      //    send_UARTString("LOG_TIMER\r\n");
+ 642   1      //  }
+ 643   1      
+ 644   1      }
+ 645          
+ 646          void Timer0_ISR(void) interrupt 1        // Vector @  0x0B
+ 647          {
+ 648   1          TH0 = u8TH0_Tmp;
+ 649   1          TL0 = u8TL0_Tmp;
+ 650   1          clr_TCON_TF0;
+ 651   1        
+ 652   1        Timer0_IRQHandler();
+ 653   1      }
+ 654          
+ 655          void TIMER0_Init(void)
+ 656          {
+ 657   1        uint16_t res = 0;
+ 658   1      
+ 659   1        ENABLE_TIMER0_MODE1;
+ 660   1        
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 12  
+
+ 661   1        u8TH0_Tmp = HIBYTE(TIMER_DIV12_VALUE_1ms_FOSC_240000);
+ 662   1        u8TL0_Tmp = LOBYTE(TIMER_DIV12_VALUE_1ms_FOSC_240000); 
+ 663   1      
+ 664   1          TH0 = u8TH0_Tmp;
+ 665   1          TL0 = u8TL0_Tmp;
+ 666   1      
+ 667   1          ENABLE_TIMER0_INTERRUPT;                       //enable Timer0 interrupt
+ 668   1          ENABLE_GLOBAL_INTERRUPT;                       //enable interrupts
+ 669   1        
+ 670   1          set_TCON_TR0;                                  //Timer0 run
+ 671   1      }
+ 672          
+ 673          
+ 674          void Serial_ISR (void) interrupt 4 
+ 675          {
+ 676   1          if (RI)
+ 677   1          {   
+ 678   2            uart0_receive_flag = 1;
+ 679   2            uart0_receive_data = SBUF;
+ 680   2            clr_SCON_RI;                                         // Clear RI (Receive Interrupt).
+ 681   2          }
+ 682   1          if  (TI)
+ 683   1          {
+ 684   2            if(!BIT_UART)
+ 685   2            {
+ 686   3                TI = 0;
+ 687   3            }
+ 688   2          }
+ 689   1      }
+ 690          
+ 691          void UART0_Init(void)
+ 692          {
+ 693   1        #if 1
+ 694   1        unsigned long u32Baudrate = 115200;
+ 695   1        P06_QUASI_MODE;    //Setting UART pin as Quasi mode for transmit
+ 696   1        SCON = 0x50;          //UART0 Mode1,REN=1,TI=1
+ 697   1        set_PCON_SMOD;        //UART0 Double Rate Enable
+ 698   1        T3CON &= 0xF8;        //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1)
+ 699   1        set_T3CON_BRCK;        //UART0 baud rate clock source = Timer3
+ 700   1      
+ 701   1        #if defined (ENABLE_16MHz)
+                RH3    = HIBYTE(65536 - (1000000/u32Baudrate)-1);  
+                RL3    = LOBYTE(65536 - (1000000/u32Baudrate)-1);  
+                #elif defined (ENABLE_24MHz)
+ 705   1        RH3    = HIBYTE(65536 - (SYS_CLOCK/16/u32Baudrate));  
+ 706   1        RL3    = LOBYTE(65536 - (SYS_CLOCK/16/u32Baudrate));  
+ 707   1        #endif
+ 708   1        
+ 709   1        set_T3CON_TR3;         //Trigger Timer3
+ 710   1        set_IE_ES;
+ 711   1      
+ 712   1        ENABLE_GLOBAL_INTERRUPT;
+ 713   1      
+ 714   1        set_SCON_TI;
+ 715   1        BIT_UART=1;
+ 716   1        #else 
+                  UART_Open(SYS_CLOCK,UART0_Timer3,115200);
+                  ENABLE_UART0_PRINTF; 
+                #endif
+ 720   1      }
+ 721          
+ 722          
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 13  
+
+ 723          #if defined (ENABLE_16MHz)
+              void MODIFY_HIRC_16(void)
+              {
+                  unsigned char data hircmap0,hircmap1;
+                  set_CHPCON_IAPEN;
+                  IAPAL = 0x30;
+                  IAPAH = 0x00;
+                  IAPCN = READ_UID;
+                  set_IAPTRG_IAPGO;
+                  hircmap0 = IAPFD;
+                  IAPAL = 0x31;
+                  IAPAH = 0x00;
+                  set_IAPTRG_IAPGO;
+                  hircmap1 = IAPFD;
+                  clr_CHPCON_IAPEN;
+                  TA=0XAA;
+                  TA=0X55;
+                  RCTRIM0 = hircmap0;
+                  TA=0XAA;
+                  TA=0X55;
+                  RCTRIM1 = hircmap1;
+              }
+              
+              #elif defined (ENABLE_24MHz)
+ 747          void MODIFY_HIRC_24(void)
+ 748          {
+ 749   1          unsigned char data hircmap0,hircmap1;
+ 750   1      /* Check if power on reset, modify HIRC */
+ 751   1          if (PCON&SET_BIT4)
+ 752   1          {
+ 753   2              set_CHPCON_IAPEN;
+ 754   2              IAPAL = 0x38;
+ 755   2              IAPAH = 0x00;
+ 756   2              IAPCN = READ_UID;
+ 757   2              set_IAPTRG_IAPGO;
+ 758   2              hircmap0 = IAPFD;
+ 759   2              IAPAL = 0x39;
+ 760   2              IAPAH = 0x00;
+ 761   2              set_IAPTRG_IAPGO;
+ 762   2              hircmap1 = IAPFD;
+ 763   2              clr_CHPCON_IAPEN;
+ 764   2              TA=0XAA;
+ 765   2              TA=0X55;
+ 766   2              RCTRIM0 = hircmap0;
+ 767   2              TA=0XAA;
+ 768   2              TA=0X55;
+ 769   2              RCTRIM1 = hircmap1;
+ 770   2              clr_CHPCON_IAPEN;
+ 771   2          }
+ 772   1      }
+ 773          
+ 774          #endif
+ 775          
+ 776          void SYS_Init(void)
+ 777          {
+ 778   1          MODIFY_HIRC_24();
+ 779   1      
+ 780   1          ALL_GPIO_QUASI_MODE;
+ 781   1          ENABLE_GLOBAL_INTERRUPT;                // global enable bit  
+ 782   1      }
+ 783          
+ 784          void main (void) 
+C51 COMPILER V9.55   MAIN                                                                  01/06/2020 17:12:13 PAGE 14  
+
+ 785          {
+ 786   1          SYS_Init();
+ 787   1      
+ 788   1          UART0_Init();
+ 789   1      
+ 790   1        //P1.2 , PWM0_CH0  , LED1
+ 791   1        //P1.1 , PWM0_CH1
+ 792   1        PWM0_CHx_Init(PWM_FREQ);
+ 793   1                      
+ 794   1        //P0.4 , ADC_CH5
+ 795   1        ADC_InitChannel(TARGET_CH5);
+ 796   1      
+ 797   1        //P05 , GPIO
+ 798   1        GPIO_Init();          
+ 799   1            
+ 800   1        TIMER0_Init();  
+ 801   1      
+ 802   1          while(1)
+ 803   1          {
+ 804   2          ADC_ConvertChannel();
+ 805   2          }
+ 806   1      
+ 807   1      
+ 808   1      }
+ 809          
+ 810          
+ 811          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3131    ----
+   CONSTANT SIZE    =     75    ----
+   XDATA SIZE       =     40      59
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       2
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      3    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

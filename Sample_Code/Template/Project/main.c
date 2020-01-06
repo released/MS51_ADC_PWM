@@ -14,7 +14,7 @@
 /*  File Function: MS51 DEMO project                                                                        */
 /************************************************************************************************************/
 
-#include "MS51.h"
+#include "MS51_16K.h"
 
 enum{
 	TARGET_CH0 = 0 ,
@@ -34,65 +34,118 @@ typedef enum
 {
 	ADC_DataState_AVERAGE = 0 ,
 	ADC_DataState_MMA , 
+	ADC_DataState_DROP , 
 	
 	ADC_DataState_DEFAULT 	
 }ADC_DataState_TypeDef;
 
+
+//#define ENABLE_16MHz
+#define ENABLE_24MHz
+
+#if defined (ENABLE_16MHz)
+#define SYS_CLOCK 								(16000000ul)
+#elif defined (ENABLE_24MHz)
 #define SYS_CLOCK 								(24000000ul)
+#endif
+
 #define PWM_FREQ 								(15000ul)
 
 #define LED_REVERSE(x)							(100-x)			// because lED in EVM schematic , need to reverse level
 
 #define TIMER_LOG_MS							(1000ul)
-#define ADC_SAMPLETIME_MS						(20ul)
+//#define ADC_SAMPLETIME_MS						(20ul)
 #define GPIO_TOGGLE_MS							(500ul)
 
 #define ADC_RESOLUTION							(4096ul)
-#define ADC_REF_VOLTAGE							(3300ul)	//(float)(3.3f)
+//#define ADC_REF_VOLTAGE							(3300ul)	//(float)(3.3f)
 
 #define ADC_MAX_TARGET							(4095ul)	//(float)(2.612f)
 #define ADC_MIN_TARGET							(0ul)	//(float)(0.423f)
 
 #define DUTY_MAX								(100ul)
 #define DUTY_MIN								(1ul)
-#define ADC_CONVERT_TARGET						(float)(ADC_MIN_TARGET*ADC_RESOLUTION/ADC_REF_VOLTAGE) //81.92000 
+//#define ADC_CONVERT_TARGET						(float)(ADC_MIN_TARGET*ADC_RESOLUTION/ADC_REF_VOLTAGE) //81.92000 
 
-#define ADC_SAMPLE_COUNT 						(16ul)			// 8
-#define ADC_SAMPLE_POWER 						(4ul)			//(5)	 	// 3	,// 2 ^ ?
+#define ADC_SAMPLE_COUNT 						(8ul)			// 8
+#define ADC_SAMPLE_POWER 						(3ul)			//(5)	 	// 3	,// 2 ^ ?
+#define ADC_SAMPLE_DROP 						(4ul)
 
-#define CUSTOM_INPUT_VOLT_MAX(VREF)			(2350ul)	//(VREF)			//(3300ul)
-#define CUSTOM_INPUT_VOLT_MIN					(600ul)
+#define CUSTOM_INPUT_VOLT_MAX(VREF)			(VREF)			//(3300ul)
+#define CUSTOM_INPUT_VOLT_MIN					(0)	//(600ul)
 
 #define ADC_DIGITAL_SCALE(void) 					(0xFFFU >> ((0) >> (3U - 1U)))		//0: 12 BIT 
 
 //#define ENABLE_LED_DIMMING_WITH_PWM
 #define ENABLE_CONVERT_ADC_TO_DUTY_DEMO
 
+//#define ENABLE_ADC_MMA
+#define ENABLE_ADC_DROP_AVG
+
 uint8_t 	u8TH0_Tmp = 0;
 uint8_t 	u8TL0_Tmp = 0;
 
 uint8_t 	DUTY_LED = 0;
-uint8_t 	FLAG_LED = 1;
+
+
+//UART 0
+bit BIT_TMP;
+bit BIT_UART;
+bit uart0_receive_flag=0;
+unsigned char uart0_receive_data;
 
 double  Bandgap_Voltage,AVdd,Bandgap_Value;      //please always use "double" mode for this
 unsigned char xdata ADCdataVBGH, ADCdataVBGL;
 
-uint16_t movingAverage_Target = 0;
-unsigned long int movingAverageSum_Target = 0;
-uint8_t ADCDataReady = 0;
+uint16_t adc_target = 0;
+unsigned long int adc_sum_target = 0;
 uint16_t adc_data = 0;
+uint16_t adc_convert_target = 0;
+uint16_t adc_ref_voltage = 0;
 
 ADC_DataState_TypeDef ADCDataState = ADC_DataState_DEFAULT;
 
+typedef enum{
+	flag_LED = 0 ,
+	
+	flag_DEFAULT	
+}Flag_Index;
 
-void SendString(uint8_t* Data)
+uint8_t BitFlag = 0;
+#define BitFlag_ON(flag)							(BitFlag|=flag)
+#define BitFlag_OFF(flag)							(BitFlag&=~flag)
+#define BitFlag_READ(flag)							((BitFlag&flag)?1:0)
+#define ReadBit(bit)								(uint8_t)(1<<bit)
+
+uint8_t is_flag_set(Flag_Index idx)
+{
+	return BitFlag_READ(ReadBit(idx));
+}
+
+void set_flag(Flag_Index idx , uint8_t en)
+{
+	if (en)
+	{
+		BitFlag_ON(ReadBit(idx));
+	}
+	else
+	{
+		BitFlag_OFF(ReadBit(idx));
+	}
+}
+
+void send_UARTString(uint8_t* Data)
 {
 	#if 1
 	uint16_t i = 0;
 
 	while (Data[i] != '\0')
 	{
+		#if 1
+		SBUF = Data[i++];
+		#else
 		UART_Send_Data(UART0,Data[i++]);		
+		#endif
 	}
 
 	#endif
@@ -112,6 +165,30 @@ void SendString(uint8_t* Data)
         UART_Send_Data(UART0, (unsigned char) *Data++);  
     } 
 	#endif
+}
+
+void send_UARTASCII(uint16_t Temp)
+{
+    uint8_t print_buf[16];
+    uint16_t i = 15, j;
+
+    *(print_buf + i) = '\0';
+    j = (uint16_t)Temp >> 31;
+    if(j)
+        (uint16_t) Temp = ~(uint16_t)Temp + 1;
+    do
+    {
+        i--;
+        *(print_buf + i) = '0' + (uint16_t)Temp % 10;
+        (uint16_t)Temp = (uint16_t)Temp / 10;
+    }
+    while((uint16_t)Temp != 0);
+    if(j)
+    {
+        i--;
+        *(print_buf + i) = '-';
+    }
+    send_UARTString(print_buf + i);
 }
 
 
@@ -179,6 +256,11 @@ void PWM0_CHx_Init(uint16_t uFrequency)
     PWMPL = LOBYTE((SYS_CLOCK>>4)/uFrequency-1);
 
 //	printf("\r\nPWM:0x%x  ,0x%x\r\n\r\n" , PWMPH,PWMPL);
+//	send_UARTString("\r\nPWM:");	
+//	send_UARTASCII(PWMPH);
+//	send_UARTString(",");	
+//	send_UARTASCII(PWMPL);
+//	send_UARTString("\r\n\r\n");	
 	
 	PWM0_CH0_SetDuty(LED_REVERSE(0));	
 
@@ -188,12 +270,17 @@ void PWM0_CHx_Init(uint16_t uFrequency)
 void PWM0_LED_DIMMING(void)
 {
 	PWM0_CH0_SetDuty(LED_REVERSE(DUTY_LED));
+	
 //	printf("DUTY:%d\r\n" ,DUTY_LED );
-	if (FLAG_LED)
+//	send_UARTString("DUTY:");	
+//	send_UARTASCII(DUTY_LED);
+//	send_UARTString("\r\n");
+
+	if (is_flag_set(flag_LED))
 	{
 		if ( ++DUTY_LED == 100)
 		{
-			FLAG_LED = 0;
+			set_flag(flag_LED,Disable);
 			DUTY_LED = 100;
 		}
 	}
@@ -201,7 +288,7 @@ void PWM0_LED_DIMMING(void)
 	{
 		if ( --DUTY_LED == 0)
 		{
-			FLAG_LED = 1;
+			set_flag(flag_LED,Enable);
 			DUTY_LED = 0;
 		}			
 	}
@@ -246,63 +333,87 @@ void ADC_ReadAVdd(void)
     bgvalue = (ADCRH<<4) + ADCRL;
     AVdd = (0x1000/bgvalue)*Bandgap_Voltage;
 
-    printf ("\r\n BG Voltage = %e\r\n", Bandgap_Voltage); 
-    printf ("\r\n VDD voltage = %e\r\n", AVdd); 	
+//    printf ("\r\n BG Voltage = %e\r\n", Bandgap_Voltage); 
+//    printf ("\r\n VDD voltage = %e\r\n", AVdd); 	
 }
 
-uint8_t Is_ADC_DataReady(void)
+uint16_t ADC_DropAndAverage (uint8_t drop , uint8_t avg)
 {
-	return ADCDataReady;
-}
+	uint8_t n = 0;
 
-void ADC_DataReady(uint8_t on)
-{
-	ADCDataReady = on;
+	switch(ADCDataState)
+	{
+		case ADC_DataState_DROP:
+			for ( n = 0 ; n < drop ; n++)
+			{
+				while(ADCF);
+			 	adc_data = 0;					
+				set_ADCCON0_ADCS; //after convert , trigger again	
+			}				
+			ADCDataState = ADC_DataState_AVERAGE;
+
+			break;
+			
+		case ADC_DataState_AVERAGE:
+			for ( n = 0 ; n < avg ; n++)
+			{
+				while(ADCF);
+				adc_sum_target += adc_data;					
+				set_ADCCON0_ADCS; //after convert , trigger again
+			}
+			adc_target = adc_sum_target >> ADC_SAMPLE_POWER ;
+			break;				
+	}
+	
+	adc_sum_target = 0;
+
+	return adc_target;
 }
 
 uint16_t ADC_ModifiedMovingAverage (void)
 {
 	static uint16_t cnt = 0;
-	uint16_t d = 0;
-	
-	if (Is_ADC_DataReady())
-	{
-		ADC_DataReady(0);
-
-		d = adc_data;
 		
-		switch(ADCDataState)
-		{
-			case ADC_DataState_AVERAGE:
-				movingAverageSum_Target += d;
-				if (cnt++ >= (ADC_SAMPLE_COUNT-1))
-				{
-					cnt = 0;
-					movingAverage_Target = movingAverageSum_Target >> ADC_SAMPLE_POWER ;	//	/ADC_SAMPLE_COUNT;;
-					ADCDataState = ADC_DataState_MMA;
-				}			
-				break;
-				
-			case ADC_DataState_MMA:
-				movingAverageSum_Target -=  movingAverage_Target;
-				movingAverageSum_Target += d;
-				movingAverage_Target = movingAverageSum_Target >> ADC_SAMPLE_POWER ;	//	/ADC_SAMPLE_COUNT;
-	
-//				printf("Average : %d\r\n" , movingAverage_Target);
-				break;				
-		}
-	}	
+	switch(ADCDataState)
+	{
+		case ADC_DataState_AVERAGE:
+			while(ADCF);
+			adc_sum_target += adc_data;
+			if (cnt++ >= (ADC_SAMPLE_COUNT-1))
+			{
+				cnt = 0;
+				adc_target = adc_sum_target >> ADC_SAMPLE_POWER ;	//	/ADC_SAMPLE_COUNT;;
+				ADCDataState = ADC_DataState_MMA;
+			}			
+			break;
+			
+		case ADC_DataState_MMA:
+			while(ADCF);
+			adc_sum_target -=  adc_target;
+			adc_sum_target += adc_data;
+			adc_target = adc_sum_target >> ADC_SAMPLE_POWER ;	//	/ADC_SAMPLE_COUNT;
 
-	return movingAverage_Target;
+			break;				
+	}
+	
+
+	return adc_target;
 }
 
 
-void ADC_MMA_Initial(void)
+void ADC_Parameter_Initial(void)
 {
+	#if defined (ENABLE_ADC_MMA)
 	ADCDataState = ADC_DataState_AVERAGE;
-	movingAverageSum_Target = 0;
-	movingAverage_Target = 0;
-	ADC_DataReady(0);
+	#endif
+		
+	#if defined (ENABLE_ADC_DROP_AVG)
+	ADCDataState = ADC_DataState_DROP;
+	#endif
+		
+	adc_sum_target = 0;
+	adc_target = 0;
+
 }
 
 uint16_t ADC_To_Voltage(uint16_t adc_value)
@@ -311,7 +422,14 @@ uint16_t ADC_To_Voltage(uint16_t adc_value)
 
 	volt = (AVdd*adc_value)/ADC_DIGITAL_SCALE();
 	
-	printf("input:%4d,volt : %4d mv\r\n",adc_value,volt);
+//	printf("input:%4d,volt : %4d mv\r\n",adc_value,volt);
+	send_UARTString("adc_value:");	
+	send_UARTASCII(adc_value);
+	send_UARTString(",volt:");
+	send_UARTASCII(volt);
+	send_UARTString("mv,AVdd:");
+	send_UARTASCII(AVdd);	
+	send_UARTString("mv\r\n");
 
 	return volt;	
 }
@@ -320,14 +438,15 @@ uint16_t ADC_To_Duty(uint16_t adc_value)
 {
 	uint16_t adc_max = 0;
 	uint16_t adc_min = 0;
-	uint16_t volt_max = CUSTOM_INPUT_VOLT_MAX(0);
+	uint16_t volt_max = CUSTOM_INPUT_VOLT_MAX(AVdd);//CUSTOM_INPUT_VOLT_MAX(0);
 	uint16_t volt_min = CUSTOM_INPUT_VOLT_MIN;
 	uint16_t duty = 0;
 	uint16_t adc_target = 0;	
 	uint16_t interval = DUTY_MAX - DUTY_MIN + 1;	
+	adc_ref_voltage = AVdd;
 	
-	adc_max = (ADC_RESOLUTION * volt_max)/ADC_REF_VOLTAGE ;
-	adc_min = (ADC_RESOLUTION * volt_min)/ADC_REF_VOLTAGE ;	
+	adc_max = (ADC_RESOLUTION * volt_max)/adc_ref_voltage ;
+	adc_min = (ADC_RESOLUTION * volt_min)/adc_ref_voltage ;	
 	
 	adc_target = (adc_value <= adc_min) ? (adc_min) : (adc_value) ;
 	adc_target = (adc_target >= adc_max) ? (adc_max) : (adc_target) ;
@@ -335,7 +454,18 @@ uint16_t ADC_To_Duty(uint16_t adc_value)
 	duty = (float)(adc_target - adc_min)*interval/(adc_max - adc_min) + 1;
 	duty = (duty >= DUTY_MAX) ? (DUTY_MAX) : (duty) ;
 	
-	printf("adc_value:%4d,adc_min:%4d,adc_max:%4d,adc_target : %4d , duty : %3d \r\n",adc_value,adc_min,adc_max , adc_target , duty);
+//	printf("adc_value:%4d,adc_min:%4d,adc_max:%4d,adc_target : %4d , duty : %3d \r\n",adc_value,adc_min,adc_max , adc_target , duty);
+	send_UARTString("adc_value:");	
+	send_UARTASCII(adc_value);
+	send_UARTString(",adc_min:");
+	send_UARTASCII(adc_min);
+	send_UARTString(",adc_max:");
+	send_UARTASCII(adc_max);
+	send_UARTString(",adc_target:");
+	send_UARTASCII(adc_target);
+	send_UARTString(",duty:");
+	send_UARTASCII(duty);
+	send_UARTString("\r\n");
 
 	return duty;	
 }
@@ -345,39 +475,69 @@ uint16_t ADC_ConvertChannel(void)
 {
 	volatile uint16_t adc_value = 0;
 	volatile uint16_t duty_value = 0;
-	volatile uint16_t target_value = 0;
+	adc_ref_voltage = AVdd;
+	
+	adc_convert_target = (ADC_MIN_TARGET*ADC_RESOLUTION/adc_ref_voltage);
 
-	adc_value = ADC_ModifiedMovingAverage();
+	#if defined (ENABLE_ADC_DROP_AVG)
+	adc_value = ADC_DropAndAverage(ADC_SAMPLE_DROP,ADC_SAMPLE_COUNT);
+//	send_UARTString("adc_value (DropAndAverage) :");	
+//	send_UARTASCII(adc_value);
+//	send_UARTString("\r\n");
 
-	adc_value = (adc_value <= ADC_CONVERT_TARGET) ? (ADC_CONVERT_TARGET) : (adc_value); 
+	adc_value = (adc_value <= adc_convert_target) ? (adc_convert_target) : (adc_value); 
 	adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
-	target_value = adc_value;
 
 	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
-	duty_value = ADC_To_Duty(target_value);
-	
+	duty_value = ADC_To_Duty(adc_value);	
 	PWM0_CH1_SetDuty(duty_value);
 	//for quick demo
 	PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
-
 	#else
+	ADC_To_Voltage(adc_value);
+	#endif
 
-	ADC_To_Voltage(target_value);
+	
+	#endif
+	
+	#if defined (ENABLE_ADC_MMA)
+	adc_value = ADC_ModifiedMovingAverage();
+//	send_UARTString("adc_value (MMA) :");	
+//	send_UARTASCII(adc_value);
+//	send_UARTString("\r\n");
+	
+	adc_value = (adc_value <= adc_convert_target) ? (adc_convert_target) : (adc_value); 
+	adc_value = (adc_value >= ADC_RESOLUTION) ? (ADC_RESOLUTION) : (adc_value); 
 
+	#if defined (ENABLE_CONVERT_ADC_TO_DUTY_DEMO)
+	duty_value = ADC_To_Duty(adc_value);	
+	PWM0_CH1_SetDuty(duty_value);
+	//for quick demo
+	PWM0_CH0_SetDuty(LED_REVERSE(duty_value));
+	#else
+	ADC_To_Voltage(adc_value);
 	#endif
 
 	set_ADCCON0_ADCS; //after convert , trigger again
+	#endif
 	
-	return target_value;
+	return adc_value;
 }
 
 void ADC_ISR(void) interrupt 11          // Vector @  0x5B
-{
-	//	adc_data = ((ADCRH<<4) + ADCRL);	
+{	
+    _push_(SFRS);
+
+//	adc_data = ((ADCRH<<4) + ADCRL);	
 	adc_data = (((ADCRH<<4) + ADCRL)>>1)<<1;
 
-	ADC_DataReady(1);	
+//	send_UARTString("ADC_ISR :");	
+//	send_UARTASCII(adc_data);
+//	send_UARTString("\r\n");
+
     clr_ADCCON0_ADCF; //clear ADC interrupt flag
+
+     _pop_(SFRS);   
 }
 
 void ADC_InitChannel(uint8_t CH)
@@ -440,7 +600,7 @@ void ADC_InitChannel(uint8_t CH)
     ENABLE_GLOBAL_INTERRUPT;
 	#endif
 
-	ADC_MMA_Initial();
+	ADC_Parameter_Initial();
 
 //	return ((ADCRH<<4) + ADCRL);
 
@@ -449,8 +609,8 @@ void ADC_InitChannel(uint8_t CH)
 void Timer0_IRQHandler(void)
 {
 //	static uint16_t LOG_TIMER = 0;
-	static uint16_t CNT_TIMER = 0;
-	static uint16_t CNT_ADC = 0;
+//	static uint16_t CNT_TIMER = 0;
+//	static uint16_t CNT_ADC = 0;
 	static uint16_t CNT_GPIO = 0;
 	static uint16_t CNT_LED = 0;
 
@@ -468,18 +628,18 @@ void Timer0_IRQHandler(void)
 		GPIO_Toggle();
 	}	
 
-	if (CNT_ADC++ >= ADC_SAMPLETIME_MS)
-	{		
-		CNT_ADC = 0;
-		ADC_ConvertChannel();
-	}
+//	if (CNT_ADC++ >= ADC_SAMPLETIME_MS)
+//	{		
+//		CNT_ADC = 0;
+//		ADC_ConvertChannel();
+//	}
 
-	if (CNT_TIMER++ >= TIMER_LOG_MS)
-	{		
-		CNT_TIMER = 0;
+//	if (CNT_TIMER++ >= TIMER_LOG_MS)
+//	{		
+//		CNT_TIMER = 0;
 //    	printf("LOG:%d\r\n",LOG_TIMER++);
-//		SendString("LOG_TIMER\r\n");
-	}
+//		send_UARTString("LOG_TIMER\r\n");
+//	}
 
 }
 
@@ -492,7 +652,7 @@ void Timer0_ISR(void) interrupt 1        // Vector @  0x0B
 	Timer0_IRQHandler();
 }
 
-void BasicTimer_TIMER0_Init(void)
+void TIMER0_Init(void)
 {
 	uint16_t res = 0;
 
@@ -510,11 +670,108 @@ void BasicTimer_TIMER0_Init(void)
     set_TCON_TR0;                                  //Timer0 run
 }
 
+
+void Serial_ISR (void) interrupt 4 
+{
+    if (RI)
+    {   
+      uart0_receive_flag = 1;
+      uart0_receive_data = SBUF;
+      clr_SCON_RI;                                         // Clear RI (Receive Interrupt).
+    }
+    if  (TI)
+    {
+      if(!BIT_UART)
+      {
+          TI = 0;
+      }
+    }
+}
+
 void UART0_Init(void)
 {
+	#if 1
+	unsigned long u32Baudrate = 115200;
+	P06_QUASI_MODE;    //Setting UART pin as Quasi mode for transmit
+	SCON = 0x50;          //UART0 Mode1,REN=1,TI=1
+	set_PCON_SMOD;        //UART0 Double Rate Enable
+	T3CON &= 0xF8;        //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1)
+	set_T3CON_BRCK;        //UART0 baud rate clock source = Timer3
+
+	#if defined (ENABLE_16MHz)
+	RH3    = HIBYTE(65536 - (1000000/u32Baudrate)-1);  
+	RL3    = LOBYTE(65536 - (1000000/u32Baudrate)-1);  
+	#elif defined (ENABLE_24MHz)
+	RH3    = HIBYTE(65536 - (SYS_CLOCK/16/u32Baudrate));  
+	RL3    = LOBYTE(65536 - (SYS_CLOCK/16/u32Baudrate));  
+	#endif
+	
+	set_T3CON_TR3;         //Trigger Timer3
+	set_IE_ES;
+
+	ENABLE_GLOBAL_INTERRUPT;
+
+	set_SCON_TI;
+	BIT_UART=1;
+	#else	
     UART_Open(SYS_CLOCK,UART0_Timer3,115200);
-    ENABLE_UART0_PRINTF;   
+    ENABLE_UART0_PRINTF; 
+	#endif
 }
+
+
+#if defined (ENABLE_16MHz)
+void MODIFY_HIRC_16(void)
+{
+    unsigned char data hircmap0,hircmap1;
+    set_CHPCON_IAPEN;
+    IAPAL = 0x30;
+    IAPAH = 0x00;
+    IAPCN = READ_UID;
+    set_IAPTRG_IAPGO;
+    hircmap0 = IAPFD;
+    IAPAL = 0x31;
+    IAPAH = 0x00;
+    set_IAPTRG_IAPGO;
+    hircmap1 = IAPFD;
+    clr_CHPCON_IAPEN;
+    TA=0XAA;
+    TA=0X55;
+    RCTRIM0 = hircmap0;
+    TA=0XAA;
+    TA=0X55;
+    RCTRIM1 = hircmap1;
+}
+
+#elif defined (ENABLE_24MHz)
+void MODIFY_HIRC_24(void)
+{
+    unsigned char data hircmap0,hircmap1;
+/* Check if power on reset, modify HIRC */
+    if (PCON&SET_BIT4)
+    {
+        set_CHPCON_IAPEN;
+        IAPAL = 0x38;
+        IAPAH = 0x00;
+        IAPCN = READ_UID;
+        set_IAPTRG_IAPGO;
+        hircmap0 = IAPFD;
+        IAPAL = 0x39;
+        IAPAH = 0x00;
+        set_IAPTRG_IAPGO;
+        hircmap1 = IAPFD;
+        clr_CHPCON_IAPEN;
+        TA=0XAA;
+        TA=0X55;
+        RCTRIM0 = hircmap0;
+        TA=0XAA;
+        TA=0X55;
+        RCTRIM1 = hircmap1;
+        clr_CHPCON_IAPEN;
+    }
+}
+
+#endif
 
 void SYS_Init(void)
 {
@@ -530,19 +787,21 @@ void main (void)
 
     UART0_Init();
 
-	PWM0_CHx_Init(PWM_FREQ);	//P1.2 , PWM0_CH0  , LED1
-								//P1.1 , PWM0_CH1
+	//P1.2 , PWM0_CH0  , LED1
+	//P1.1 , PWM0_CH1
+	PWM0_CHx_Init(PWM_FREQ);
+								
+	//P0.4 , ADC_CH5
+	ADC_InitChannel(TARGET_CH5);
 
-	ADC_InitChannel(TARGET_CH5);	//P0.4 , ADC_CH5
-
-	GPIO_Init();					//P05 , GPIO
+	//P05 , GPIO
+	GPIO_Init();					
 			
-	BasicTimer_TIMER0_Init();
-	
+	TIMER0_Init();	
 
     while(1)
     {
-
+		ADC_ConvertChannel();
     }
 
 

@@ -9,17 +9,65 @@
 /*  E-Mail : MicroC-8bit@nuvoton.com                                                                       */
 /*  Date   : Jan/21/2019                                                                                   */
 /***********************************************************************************************************/
-#include "MS51.h"
+#include "MS51_16K.H"
+bit PRINTFG = 0, uart0_receive_flag = 0, uart1_receive_flag;
+unsigned char uart0_receive_data, uart1_receive_data;
+
+
+void Serial_ISR(void) interrupt 4
+{
+    _push_(SFRS);
+  
+    if (RI)
+    {
+        uart0_receive_flag = 1;
+        uart0_receive_data = SBUF;
+        clr_SCON_RI;                                         // Clear RI (Receive Interrupt).
+    }
+
+    if (TI)
+    {
+        if (!PRINTFG)
+        {
+            TI = 0;
+        }
+    }
+
+    _pop_(SFRS);
+}	
+
+
+
+void SerialPort1_ISR(void) interrupt 15
+{
+    _push_(SFRS);
+  
+    if (RI_1)
+    {
+        uart1_receive_data = SBUF_1;
+        uart1_receive_flag = 1;
+        clr_SCON_1_RI_1;                             /* clear reception flag for next reception */
+    }
+
+    if (TI_1 == 1)
+    {
+        if (!PRINTFG)
+        {
+            clr_SCON_1_TI_1;                             /* if emission occur */
+        }
+    }
+
+    _pop_(SFRS);
+}
+
+
 
 /*MS51 new version buadrate */
-
 void UART_Open(unsigned long u32SysClock, unsigned char u8UARTPort,unsigned long u32Baudrate)
 {
   switch(u8UARTPort)
   {
     case UART0_Timer1:
-          P06_PUSHPULL_MODE;    //Setting UART pin as Quasi mode for transmit
-          P07_INPUT_MODE;    //Setting UART pin as Quasi mode for transmit  
           SCON = 0x50;       //UART0 Mode1,REN=1,TI=1
           TMOD |= 0x20;      //Timer1 Mode1
           set_PCON_SMOD;          //UART0 Double Rate Enable
@@ -30,8 +78,6 @@ void UART_Open(unsigned long u32SysClock, unsigned char u8UARTPort,unsigned long
       break;
       
       case UART0_Timer3:
-          P06_PUSHPULL_MODE;    //Setting UART pin as Quasi mode for transmit
-          P07_INPUT_MODE;    //Setting UART pin as Quasi mode for transmit  
           SCON = 0x50;     //UART0 Mode1,REN=1,TI=1
           set_PCON_SMOD;        //UART0 Double Rate Enable
           T3CON &= 0xF8;   //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1)
@@ -42,8 +88,6 @@ void UART_Open(unsigned long u32SysClock, unsigned char u8UARTPort,unsigned long
       break;
       
       case UART1_Timer3:
-          P16_PUSHPULL_MODE;  //Setting UART pin as Quasi mode for transmit
-          P02_INPUT_MODE;  //Setting RXD_1 pin as Input mode for transmit   
           SCON_1 = 0x50;     //UART1 Mode1,REN_1=1,TI_1=1
           T3CON = 0x80;     //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1), UART1 in MODE 1
           RH3    = HIBYTE(65536 - (u32SysClock/16/u32Baudrate));  
@@ -53,6 +97,7 @@ void UART_Open(unsigned long u32SysClock, unsigned char u8UARTPort,unsigned long
   }
 }
 
+#if 0 
 unsigned char Receive_Data(unsigned char UARTPort)
 {
     UINT8 c;
@@ -71,20 +116,17 @@ unsigned char Receive_Data(unsigned char UARTPort)
     }
     return (c);
 }
+#endif
 
 void UART_Send_Data(UINT8 UARTPort, UINT8 c)
 {
     switch (UARTPort)
     {
       case UART0:
-        TI = 0;
         SBUF = c;
-        while(TI==0);
       break;
       case UART1:
-        TI_1 = 0;
         SBUF_1 = c;
-        while(TI_1==0);
       break;
     }
 }

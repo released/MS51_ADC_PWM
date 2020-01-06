@@ -116,6 +116,13 @@
         <tIfile></tIfile>
         <pMon>BIN\Nuvoton_8051_Keil_uVision_Driver.dll</pMon>
       </DebugOpt>
+      <TargetDriverDllRegistry>
+        <SetRegEntry>
+          <Number>0</Number>
+          <Key>Nuvoton_8051_Keil_uVision_Driver</Key>
+          <Name></Name>
+        </SetRegEntry>
+      </TargetDriverDllRegistry>
       <Breakpoint/>
       <Tracepoint>
         <THDelay>0</THDelay>

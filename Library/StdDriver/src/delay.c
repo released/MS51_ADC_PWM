@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------------------------------------*/
 /*                                                                                                         */
-/* Copyright(c) 2018 Nuvoton Technology Corp. All rights reserved.                                         */
+/* Copyright(c) 2019 Nuvoton Technology Corp. All rights reserved.                                         */
 /*                                                                                                         */
 /*---------------------------------------------------------------------------------------------------------*/
 
@@ -9,7 +9,7 @@
 //  E-Mail : MicroC-8bit@nuvoton.com
 //***********************************************************************************************************
 
-#include "MS51.h"
+#include "MS51_16K.H"
 
  
 /**
@@ -27,18 +27,24 @@
 */
 void Timer0_Delay(unsigned long u32SYSCLK, unsigned int u16CNT, unsigned int u16DLYUnit)
 {
-    clr_CKCON_T0M;                                  //T0M=0, Timer0 Clock = Fsys/12
-    TMOD |= 0x01;                                   //Timer0 is 16-bit mode
+      unsigned char TL0TMP, TH0TMP;
+  
+      TIMER0_FSYS_DIV12;                                  //T0M=0, Timer0 Clock = Fsys/12
+      ENABLE_TIMER0_MODE1;                                   //Timer0 is 16-bit mode
+      TL0TMP = LOBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit/12));
+      TH0TMP = HIBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit/12));
+  
     while (u16CNT != 0)
     {
-      TL0 = LOBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit/12));
-      TH0 = HIBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit/12));
+      TL0=TL0TMP;
+      TH0=TH0TMP;
       set_TCON_TR0;                                    //Start Timer0
-      while (TF0 != 1);                       //Check Timer0 Time-Out Flag
+      while (!TF0);                       //Check Timer0 Time-Out Flag
       clr_TCON_TF0;
+      clr_TCON_TR0;                       //Stop Timer0
       u16CNT --;
     }
-    clr_TCON_TR0;                                     //Stop Timer0
+//    clr_TCON_TR0;                                     //Stop Timer0
 }
 
 /**
@@ -47,7 +53,7 @@ void Timer0_Delay(unsigned long u32SYSCLK, unsigned int u16CNT, unsigned int u16
   *                       - \ref 24000000 (use HIRC)
   *                       - \ref 22118400 (use HXT)
   * @param[in] u8CNT define count time.
-  * @param[in] u6DLYUnit define delay time base is us. From 1~10000, the maxima value please not over 10000.
+  * @param[in] u16DLYUnit define delay time base is us. From 1~10000, the maxima value please not over 10000.
   *                       - \ref 1000 (1ms)
   *                       - \ref 100 (100us)
   * @return  None
@@ -56,18 +62,23 @@ void Timer0_Delay(unsigned long u32SYSCLK, unsigned int u16CNT, unsigned int u16
 */
 void Timer1_Delay(unsigned long u32SYSCLK, unsigned int u16CNT, unsigned int u16DLYUnit)
 {
-    clr_CKCON_T1M;                              //T1M=0, Timer1 Clock = Fsys/12
-    TMOD |= 0x10;                                //Timer1 is 16-bit mode
+    unsigned char TL1TMP,TH1TMP;
+
+    TIMER1_FSYS_DIV12;                                 //T1M=0, Timer1 Clock = Fsys/12
+    ENABLE_TIMER1_MODE1;                                //Timer1 is 16-bit mode
+    TL1TMP = LOBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit)/12);
+    TH1TMP = HIBYTE(65535-((u32SYSCLK/1000000)*u16DLYUnit)/12);
+  
     while (u16CNT != 0)
     {
-      TL1 = LOBYTE(65536-(u16DLYUnit/12*(u32SYSCLK/1000000)));
-      TH1 = HIBYTE(65536-(u16DLYUnit/12*(u32SYSCLK/1000000)));
+      TL1 = TL1TMP;
+      TH1 = TH1TMP;
       set_TCON_TR1;                                //Start Timer1
-      while (TF1 != 1);                       //Check Timer0 Time-Out Flag
+      while (!TF1);                                //Check Timer1 Time-Out Flag
       clr_TCON_TF1;
+      clr_TCON_TR1;
       u16CNT --;
     }
-    clr_TCON_TR1;                             //Stop Timer1
 }
 
 /**
@@ -87,6 +98,8 @@ void Timer1_Delay(unsigned long u32SYSCLK, unsigned int u16CNT, unsigned int u16
 */
 void Timer2_Delay(unsigned long u32SYSCLK,unsigned int u16TMDIV, unsigned int u16CNT, unsigned long u32DLYUnit)
 {
+    unsigned char TL2TMP,TH2TMP;
+  
     SFRS = 0x00;
     switch (u16TMDIV)
     {
@@ -102,16 +115,18 @@ void Timer2_Delay(unsigned long u32SYSCLK,unsigned int u16TMDIV, unsigned int u1
     clr_T2CON_CMRL2;                                  //Timer 2 as auto-reload mode
     set_T2MOD_LDEN;
     set_T2MOD_CMPCR;                                  //Timer 2 value is auto-cleared as 0000H when a compare match occurs.
+    TL2TMP = LOBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u16TMDIV));
+    TH2TMP = HIBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u16TMDIV));
     while (u16CNT != 0)
     {
-      TL2 = LOBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u16TMDIV));
-      TH2 = HIBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u16TMDIV));
+      TL2 = TL2TMP;
+      TH2 = TH2TMP;
       set_T2CON_TR2;                                    //Start Timer2
       while (TF2!=1);            //Check Timer2 Time-Out Flag
       clr_T2CON_TF2;
+      clr_T2CON_TR2;                                    //Stop Timer2
       u16CNT --;
     }
-    clr_T2CON_TR2;                                    //Stop Timer2
 }
 /**
   * @brief Timer3 delay setting 
@@ -130,6 +145,8 @@ void Timer2_Delay(unsigned long u32SYSCLK,unsigned int u16TMDIV, unsigned int u1
 */
 void Timer3_Delay(unsigned long u32SYSCLK,unsigned char u8TMDIV, unsigned int u16CNT, unsigned long u32DLYUnit)
 {
+    unsigned char TL3TMP,TH3TMP;  
+  
     SFRS = 0x00;
     switch (u8TMDIV)
     {
@@ -142,17 +159,19 @@ void Timer3_Delay(unsigned long u32SYSCLK,unsigned char u8TMDIV, unsigned int u1
       case 64:T3CON&=0xF8;T3CON|=0x06; break;
       case 128:T3CON&=0xF8;T3CON|=0x07; break;
     }
+    TL3TMP = LOBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u8TMDIV));
+    TH3TMP = HIBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u8TMDIV));
     while (u16CNT != 0)
     {
       clr_T3CON_TF3;
-      RL3 = LOBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u8TMDIV));
-      RH3 = HIBYTE(65536-((u32SYSCLK/1000000)*u32DLYUnit/u8TMDIV));
+      RL3 = TL3TMP;
+      RH3 = TH3TMP;
       set_T3CON_TR3;                                    //Trigger Timer3
       while ((T3CON|CLR_BIT4)==CLR_BIT4);    //Check Timer3 Time-Out Flag
       clr_T3CON_TF3;
+      clr_T3CON_TR3;                                    //Stop Timer3
       u16CNT --;
     }
-    clr_T3CON_TR3;                                    //Stop Timer3
 }
 
 
